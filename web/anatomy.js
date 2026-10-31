@@ -22,12 +22,12 @@ function anatomyCells(items) {
     `<div class="anatomy-cell ${tone || ''}"><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(sub)}</span></div>`).join('')}</div>`;
 }
 function anatomyGate(st) {
-  const d = calc(), k = S.swa + S.extra, vl = S.variant === 'vllm';
+  const d = calc(), w = deriveWorkload(S), k = S.swa + S.extra, vl = S.variant === 'vllm';
   const checks = vl
     ? [['Phase', S.phase, S.phase === 'decode'], ['Local heads', S.heads, [8, 16].includes(S.heads)],
-       ['Max keys capacity', k, true], ['Token gate', `T=${S.token} ≤ ${k <= 256 ? 16 : 12}`, S.token <= (k <= 256 ? 16 : 12)]]
+       ['Max keys capacity', k, true], ['Token gate', `T=${S.token} ≤ ${w.gateTokens}`, S.token <= w.gateTokens]]
     : [['Phase', S.phase, ['decode', 'verify', 'draft-extend-v2'].includes(S.phase)],
-       ['Local heads', S.heads, S.heads === 16], ['Query tokens', `T=${S.token} ≤ 8`, S.token <= 8],
+       ['Local heads', S.heads, S.heads === 16], ['Query tokens', `T=${S.token} ≤ ${w.gateTokens}`, S.token <= w.gateTokens],
        ['Packed KV', '584 B/token', true]];
   const body = `<div class="anatomy-gate">${checks.map(([name, value, ok]) =>
     `<div class="${ok ? 'pass' : 'fail'}"><span>${esc(name)}</span><b>${esc(value)}</b><em>${ok ? '✓' : '×'}</em></div>`).join('')}</div>
@@ -37,7 +37,7 @@ function anatomyGate(st) {
     d.ok ? '当前参数满足教学模型的 fast path，继续检查所选 CTA 如何处理 KV。' : '当前参数触发 fallback，后续候选 Kernel 的图只用于理解实现，不代表这次请求会执行。');
 }
 function anatomyKV(st) {
-  const n = S.variant === 'vllm' ? 32 : 64;
+  const n = deriveWorkload(S).block;
   const body = `<div class="anatomy-path">
       <div><small>输入 ①</small><b>Sparse index</b><span>无效 ID / 越界必须 mask</span></div><i>→</i>
       <div><small>寻址</small><b>page = id ÷ P<br>row = id mod P</b><span>P 是实际 page size</span></div><i>→</i>
@@ -94,7 +94,8 @@ function anatomySplit(st) {
 function anatomyMapping(st) {
   const vl=S.variant==='vllm', w=deriveWorkload(S), K=S.swa+S.extra;
   const splits=w.splitsCandidate;
-  const warp=vl?(K>256&&S.token<=3?4:8):4;
+  const policy=v().dispatch;
+  const warp=vl?(K>policy.threshold_keys&&S.token<=policy.split_policy.long_tiers[0].max_tokens?4:8):4;
   const per=w.blocksPerSplit;
   const active=w.activeSplitsMax;
   const range=vl?`每 CTA 至多 ${per} 个 32-key block；每 block 16×32 scores、16×512 partial O`:'每 CTA 一个 64-key Tile；64×16 scores、512×16 partial O';
@@ -156,12 +157,19 @@ function anatomyMerge(st) {
     body, '每个 split 的 Softmax 基准不同，Merge 必须重标定后求和；额外 scratch 与第二次 launch 是收益边界的一部分。');
 }
 function anatomyConfig(st) {
-  const k = S.swa + S.extra, t = S.token;
-  const rows = [['≤256 keys','任意支持的 T','8'],['>256 keys','T≤3','32'],['>256 keys','4≤T≤7','16'],['>256 keys','8≤T≤12','8']];
-  const active = k<=256?0:t<=3?1:t<=7?2:3;
+  const k = S.swa + S.extra, t = S.token, policy=v().dispatch, rule=policy.split_policy;
+  const threshold=policy.threshold_keys, short=k<=threshold;
+  const rows = [[`≤${threshold} keys`,'任意支持的 T',String(rule.short_splits)]];
+  let lower=1;
+  for(const tier of rule.long_tiers){
+    const upper=tier.max_tokens??policy.max_tokens_long;
+    rows.push([`>${threshold} keys`,lower===1?`T≤${upper}`:`${lower}≤T≤${upper}`,String(tier.splits)]);
+    lower=upper+1;
+  }
+  const active = short?0:1+rule.long_tiers.findIndex(tier=>tier.max_tokens===undefined||t<=tier.max_tokens);
   const body = `<div class="anatomy-table"><div class="anatomy-table-head"><span>容量条件</span><span>Token 条件</span><span>Split</span></div>${rows.map((r,i)=>
     `<div class="${active===i?'active':''}"><span>${r[0]}</span><span>${r[1]}</span><b>${r[2]}</b></div>`).join('')}</div>
-    <p class="anatomy-caveat">当前输入：T=${t}，max_keys=${k}，因此选 S=${rows[active][2]}。先定 S，再算 block 怎样分给每个 CTA。表格对应固定 PR 的 _pick_config；它不是通用 GPU 常数。</p>`;
+    <p class="anatomy-caveat">当前输入：T=${t}，max_keys=${k}，因此候选配置选 S=${rows[active][2]}。${calc().ok?'':'当前触发 fallback，不会运行此候选 Kernel。'}先定 S，再算 block 怎样分给每个 CTA。表格对应固定 PR 的 _pick_config；它不是通用 GPU 常数。</p>`;
   return anatomyFigure(st, '何时选 8、16、32 个 key split？', '固定源码 _pick_config 与 token gate，按 index 容量判断。',
     body, 'Token 增多时自身并行度增加，配置降低 split 数；具体收益仍需要同条件实验验证。');
 }

@@ -59,7 +59,40 @@
         "repo": {"type": "string", "pattern": "^https://github\\.com/"},
         "pr_url": {"type": "string", "pattern": "^https://github\\.com/"},
         "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "dispatch": {"type": "object", "required": ["sm", "heads", "dtype", "mode"]},
+        "dispatch": {
+          "type": "object",
+          "required": ["sm", "heads", "dtype", "mode", "q_dtype", "cache_layout", "block_keys", "split_policy"],
+          "properties": {
+            "heads": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+            "mode": {"type": "string", "minLength": 1},
+            "q_dtype": {"type": "string", "minLength": 1},
+            "cache_layout": {"type": "string", "minLength": 1},
+            "block_keys": {"enum": [32, 64]},
+            "split_policy": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["kind", "short_splits", "long_tiers"],
+                  "properties": {
+                    "kind": {"const": "token_tiers"},
+                    "short_splits": {"type": "integer", "minimum": 1},
+                    "long_tiers": {
+                      "type": "array", "minItems": 1,
+                      "items": {
+                        "type": "object", "required": ["splits"],
+                        "properties": {
+                          "max_tokens": {"type": "integer", "minimum": 1},
+                          "splits": {"type": "integer", "minimum": 1}
+                        }
+                      }
+                    }
+                  }
+                },
+                {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "one_per_tile"}}}
+              ]
+            }
+          }
+        },
         "reported": {"type": "object", "required": ["status", "environment", "metric"]},
         "stages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stage"}}
       }

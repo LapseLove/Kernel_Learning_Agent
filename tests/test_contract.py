@@ -16,12 +16,14 @@ class ContractTests(unittest.TestCase):
         schema = json.loads((PROJECT / 'cases' / 'schema.json').read_text(encoding='utf-8'))
         jsonschema.validate(case, schema)
         self.assertEqual(validate(case), [])
-        for change in ('schema_version', 'commit', 'source'):
+        for change in ('schema_version', 'commit', 'source', 'split_policy'):
             broken = copy.deepcopy(case)
             if change == 'schema_version':
                 broken['schema_version'] = 2
             elif change == 'commit':
                 broken['variants']['vllm']['commit'] = 'x' * 40
+            elif change == 'split_policy':
+                broken['variants']['vllm']['dispatch']['split_policy']['kind'] = 'unknown'
             else:
                 broken['variants']['vllm']['stages'][0]['source']['end'] = 0
             self.assertTrue(validate(broken), change)
@@ -43,19 +45,26 @@ class ContractTests(unittest.TestCase):
             ('sglang', 9, 128, 512, 16, 'decode'),
             ('sglang', 1, 128, 512, 8, 'decode'),
         ]
-        inputs = [dict(variant=v, token=t, swa=s, extra=e, heads=h, phase=p)
+        case = load_case()
+        inputs = [dict(variant=v, token=t, swa=s, extra=e, heads=h, phase=p, case=case)
                   for v, t, s, e, h, p in scenarios]
+        modified = copy.deepcopy(case)
+        modified['variants']['vllm']['dispatch']['threshold_keys'] = 512
+        modified['variants']['vllm']['dispatch']['split_policy']['short_splits'] = 4
+        inputs.append(dict(variant='vllm', token=4, swa=128, extra=384, heads=16,
+                           phase='decode', case=modified))
         script = "const {deriveWorkload}=require('./web/model.js');let x='';process.stdin.on('data',c=>x+=c);process.stdin.on('end',()=>console.log(JSON.stringify(JSON.parse(x).map(deriveWorkload))));"
         result = subprocess.run([node, '-e', script], input=json.dumps(inputs), text=True,
                                 cwd=PROJECT, capture_output=True, check=True)
         browser = json.loads(result.stdout)
+        self.assertEqual(browser[-1]['splitsCandidate'], 4)
         keys = {'supported': 'supported', 'gateTokens': 'gate_tokens', 'block': 'block',
                 'swaBlocks': 'swa_blocks', 'extraBlocks': 'extra_blocks', 'blocks': 'blocks',
                 'keySlots': 'key_slots', 'splitsCandidate': 'splits_candidate',
                 'blocksPerSplit': 'blocks_per_split', 'activeSplitsMax': 'active_splits_max',
                 'firstEmptySplit': 'first_empty_split', 'programsCandidate': 'programs_candidate'}
         for x, got in zip(inputs, browser):
-            expected = workload(x['variant'], x['token'], x['swa'], x['extra'], x['heads'], x['phase'])
+            expected = workload(x['variant'], x['token'], x['swa'], x['extra'], x['heads'], x['phase'], case=x['case'])
             for js, py in keys.items():
                 self.assertEqual(got[js], expected[py], (x, js))
 

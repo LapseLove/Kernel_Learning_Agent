@@ -26,8 +26,19 @@ def validate(case: dict) -> list[str]:
             errors.append(f'{vid}: commit must be pinned SHA-40')
         if not v.get('repo', '').startswith('https://github.com/'):
             errors.append(f'{vid}: repo must be a GitHub URL')
-        if not isinstance(v.get('dispatch'), dict):
+        policy = v.get('dispatch')
+        if not isinstance(policy, dict):
             errors.append(f'{vid}: dispatch contract missing')
+        else:
+            rule = policy.get('split_policy')
+            if not isinstance(rule, dict) or rule.get('kind') not in ('token_tiers', 'one_per_tile'):
+                errors.append(f'{vid}: split policy missing or unsupported')
+            elif not isinstance(policy.get('block_keys'), int) or policy['block_keys'] < 1:
+                errors.append(f'{vid}: block_keys invalid')
+            elif rule['kind'] == 'token_tiers' and (
+                not isinstance(rule.get('long_tiers'), list) or not rule['long_tiers'] or
+                'max_tokens' in rule['long_tiers'][-1]):
+                errors.append(f'{vid}: token tiers need a final catch-all tier')
         ids = set()
         for st in v.get('stages', []):
             sid = st.get('id')
@@ -45,23 +56,30 @@ def validate(case: dict) -> list[str]:
 
 def workload(variant: str, tokens: int, swa: int, extra: int, heads: int,
              phase: str = 'decode', *, q_dtype: str = 'bf16',
-             cache_layout: str = 'v4-packed-584') -> dict:
+             cache_layout: str = 'v4-packed-584', case: dict | None = None) -> dict:
     """Candidate launch geometry and documented gate; hardware assumptions remain explicit."""
     if tokens < 1 or swa < 0 or extra < 0 or heads < 1:
         raise ValueError('invalid workload')
-    keys = swa + extra
-    if variant == 'vllm':
-        block = 32
-        gate = 16 if keys <= 256 else 12
-        splits = 8 if keys <= 256 else 32 if tokens <= 3 else 16 if tokens <= 7 else 8
-        ok = phase == 'decode' and heads in (8, 16) and q_dtype == 'bf16' and cache_layout == 'v4-packed-584' and tokens <= gate
-    elif variant == 'sglang':
-        block = 64
-        gate = 8
-        splits = ceil(swa / block) + ceil(extra / block)
-        ok = phase in ('decode', 'verify', 'draft-extend-v2') and heads == 16 and q_dtype == 'bf16' and cache_layout == 'v4-packed-584' and tokens <= gate
-    else:
+    case = case if case is not None else load_case()
+    if variant not in case['variants']:
         raise ValueError(f'unknown variant: {variant}')
+    policy = case['variants'][variant]['dispatch']
+    keys = swa + extra
+    block = policy['block_keys']
+    split_policy = policy['split_policy']
+    if split_policy['kind'] == 'token_tiers':
+        threshold = policy['threshold_keys']
+        gate = policy['max_tokens_short'] if keys <= threshold else policy['max_tokens_long']
+        splits = split_policy['short_splits'] if keys <= threshold else next(
+            tier['splits'] for tier in split_policy['long_tiers']
+            if 'max_tokens' not in tier or tokens <= tier['max_tokens'])
+    elif split_policy['kind'] == 'one_per_tile':
+        gate = policy['max_tokens']
+        splits = ceil(swa / block) + ceil(extra / block)
+    else:
+        raise ValueError(f"unknown split policy: {split_policy['kind']}")
+    ok = (phase in policy['mode'].split('/') and heads in policy['heads'] and
+          q_dtype == policy['q_dtype'] and cache_layout == policy['cache_layout'] and tokens <= gate)
     blocks = ceil(swa / block) + ceil(extra / block)
     per = ceil(blocks / splits) if splits else 0
     active = ceil(blocks / per) if per else 0
@@ -85,10 +103,11 @@ def dispatch(variant: str, tokens: int, swa_keys: int, extra_keys: int, heads: i
     keys = swa_keys + extra_keys
     if variant == 'vllm':
         gate, ok, splits = w['gate_tokens'], w['supported'], w['splits_candidate']
+        threshold = load_case()['variants'][variant]['dispatch']['threshold_keys']
         return {'selected': 'small-head SM90 Triton' if ok else 'FlashMLA fallback',
                 'supported': ok, 'splits': splits if ok else None,
                 'programs': tokens * splits if ok else None,
-                'gate': f'{"≤256" if keys <= 256 else ">256"} keys; T≤{gate}',
+                'gate': f'{"≤" if keys <= threshold else ">"}{threshold} keys; T≤{gate}',
                 'reason': 'SM90 + heads∈{8,16} + BF16 Q + matching 584B cache + decode; other hardware gates assumed pinned'}
     if variant == 'sglang':
         ok, splits = w['supported'], w['splits_candidate']

@@ -26,10 +26,10 @@ const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const v=()=>S.case.variants[S.variant];
 const repoFile=(st)=>`${v().repo}/blob/${v().commit}/${st.source.file}#L${st.source.start}-L${st.source.end}`;
 const section=(title,extra='')=>`<div class="sectionhead"><h2>${title}</h2><span>${extra}</span></div>`;
-function calc(){const w=deriveWorkload(S),vl=S.variant==='vllm';
+function calc(){const w=deriveWorkload(S),vl=S.variant==='vllm',threshold=v().dispatch.threshold_keys;
  return {ok:w.supported,splits:w.supported?w.splitsCandidate:null,
   programs:w.supported?w.programsCandidate:null,
-  gate:vl?`${S.swa+S.extra<=256?'短 Keys ≤256':'长 Keys >256'} · T ≤ ${w.gateTokens}`:'SM100/103 · H=16 · T ≤ 8 · V4 Packed',
+  gate:vl?`${S.swa+S.extra<=threshold?`短 Keys ≤${threshold}`:`长 Keys >${threshold}`} · T ≤ ${w.gateTokens}`:'SM100/103 · H=16 · T ≤ 8 · V4 Packed',
   name:vl?(w.supported?'Small-head Triton':'FlashMLA fallback'):(w.supported?'Gluon tcgen05 fast path':'Existing attention fallback')};
 }
 function metrics(){const x=v();return `<div class="grid-top">

@@ -94,7 +94,19 @@
         "max_tokens_short": 16,
         "max_tokens_long": 12,
         "threshold_keys": 256,
-        "mode": "decode"
+        "mode": "decode",
+        "q_dtype": "bf16",
+        "cache_layout": "v4-packed-584",
+        "block_keys": 32,
+        "split_policy": {
+          "kind": "token_tiers",
+          "short_splits": 8,
+          "long_tiers": [
+            {"max_tokens": 3, "splits": 32},
+            {"max_tokens": 7, "splits": 16},
+            {"splits": 8}
+          ]
+        }
       },
       "formula": "sm90: max_keys≤256 时 T≤16；max_keys>256 时 T≤12；长 key 用 32/16/8 splits，短 key 用 8 splits。",
       "reported": {
@@ -327,7 +339,11 @@
         "dim": 512,
         "max_tokens": 8,
         "cache_bytes": 584,
-        "mode": "decode/verify/draft-extend-v2"
+        "mode": "decode/verify/draft-extend-v2",
+        "q_dtype": "bf16",
+        "cache_layout": "v4-packed-584",
+        "block_keys": 64,
+        "split_policy": {"kind": "one_per_tile"}
       },
       "formula": "SM100/103 且 H_local=16、Q=BF16、D=512、指定 V4 KV packed=584 bytes、T=1..8；其余走已有 backend。",
       "reported": {

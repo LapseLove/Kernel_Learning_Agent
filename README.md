@@ -37,6 +37,8 @@ python -m kernel_learning build --check
 
 `export-html --output <path>` 生成可分享页面，默认不包含 `web/local-sources.json` 中的本地导入源码；只有显式加 `--include-local-sources` 才嵌入，请在分享前审阅。`build` 始终使用不嵌入本地源码的默认行为。
 
+页面把章节、方案、输入参数、所选 CTA 和 QK/PV 视角写入 URL 的 `#` 部分；刷新或浏览器前进／后退可恢复学习位置。该链接指向你本机的 HTML 或服务地址，分享给其他人时对方也需有项目文件或可访问的服务。
+
 ## v0.5：先跟着一个 CTA，之后再看成本
 
 默认案例固定为 vLLM、T=4、H=16、SWA=128、Extra=512：先解释 key 位置、32-key block、split/CTA、每轮 32×512 KV Tile 的包含关系，再连续推导 20 blocks → S=16 → 每 split 最多 2 blocks。主线跟踪非空 split 0 的两轮 Gather/计算、partial 写入和第二个 Merge Kernel；split 10 的空边界放在可展开说明中。Anatomy 阶段按配置、分工、加载、计算、归并排序；成本核算和 Dispatch 放在执行链后。交互控件改变时整条推导链一起重算。

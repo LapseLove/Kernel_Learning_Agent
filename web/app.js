@@ -2,6 +2,25 @@
    The graphics are CONCEPTUAL unless the evidence level says otherwise. */
 'use strict';
 const S={case:null,variant:'vllm',view:'overview',stage:0,token:4,swa:128,extra:512,heads:16,phase:'decode',local:{},pinned:{},experiment:-1,inspectToken:0,inspectSplit:0,mmaView:'qk'};
+const STATE_KEYS=['variant','view','stage','token','swa','extra','heads','phase','inspectToken','inspectSplit','mmaView'];
+function restoreState(){
+ const p=new URLSearchParams(location.hash.slice(1));
+ if(['vllm','sglang'].includes(p.get('variant')))S.variant=p.get('variant');
+ if(['overview','evolution','anatomy','evidence','experiments'].includes(p.get('view')))S.view=p.get('view');
+ for(const [key,allowed] of Object.entries({token:[1,24],stage:[0,50],inspectToken:[0,23],inspectSplit:[0,64]})){
+  const raw=p.get(key),num=Number(raw);if(raw!==null&&Number.isInteger(num)&&num>=allowed[0]&&num<=allowed[1])S[key]=num;
+ }
+ for(const [key,allowed] of Object.entries({swa:[32,64,128,256],extra:[0,64,512,1024],heads:[8,16,32]})){
+  const raw=p.get(key),num=Number(raw);if(raw!==null&&allowed.includes(num))S[key]=num;
+ }
+ if(['decode','verify','draft-extend-v2','prefill'].includes(p.get('phase')))S.phase=p.get('phase');
+ if(['qk','pv'].includes(p.get('mmaView')))S.mmaView=p.get('mmaView');
+ S.stage=Math.min(S.stage,S.case.variants[S.variant].stages.length-1);
+}
+function saveState(push=false){
+ const p=new URLSearchParams();for(const key of STATE_KEYS)p.set(key,String(S[key]));
+ history[push?'pushState':'replaceState'](null,'','#'+p.toString());
+}
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const v=()=>S.case.variants[S.variant];
@@ -117,10 +136,10 @@ function evolution(){const a=S.case;return `<div class="guide-intro"><span>第�
 
 function evidence(){const x=v(),r=x.reported;return `${metrics()}${section('Reported performance','数据来自 PR 作者；本地未复测')}<div class="alert">${esc(r.environment)}<br>不同硬件/TP/框架、输入长度、DSpark 设置不同。这里只做「同 PR 下 baseline vs candidate」比较，不进行 vLLM 与 SGLang 的绝对速度横比。</div>${section(r.metric,'only within this experiment')}<div class="pane tablewrap"><table class="data-table"><thead><tr><th>Workload</th><th>Baseline</th><th>Candidate</th><th>Reported result</th></tr></thead><tbody>${r.rows.map(row=>`<tr><td>${esc(row.label)}</td><td>${row.before.toLocaleString()} ${esc(row.unit)}</td><td>${row.after.toLocaleString()} ${esc(row.unit)}</td><td>${esc(row.note)}</td></tr>`).join('')}</tbody></table><div class="smalldesc" style="padding:16px 0 0">Benchmark results quoted from <a href="${esc(x.pr_url)}" target="_blank" rel="noopener noreferrer">PR #${x.pr}</a>; not measured by this studio.</div></div>${section('Validation evidence','真实性、精度边界、Serving 生命周期')}<div class="two-cols"><div class="pane"><div class="smallcaps">NUMERICAL / CORRECTNESS</div><p class="text-body">${esc(r.accuracy)}</p></div><div class="pane"><div class="smallcaps">CUDA GRAPH / WARMUP</div><p class="text-body">${esc(r.warmup)}</p></div></div>${section('Profiling protocol (next phase)','未采样的数据不画成真实 Trace')}<div class="pane"><div class="listline"><b>Profile A: kernel microbenchmark</b><p>固定 SM / dtype / packed cache，按 T × (SWA, extra) × heads 扫描；记录 latency、资源使用、DRAM/L2 bytes、issue/warp active。</p></div><div class="listline"><b>Profile B: graph and startup</b><p>端到端 CUDA Graph replay 与 JIT 首次编译区分，校验动态 page IDs/length 变化是否生效。</p></div><div class="listline"><b>Profile C: matched accuracy</b><p>独立 FP64 reference、FP32 tolerance、BF16 输出边界、sink、空行、非连续 stride、sanitizer。</p></div></div>${bottom()}`}
 function experiments(){const qs=S.case.hypotheses;return `${metrics()}${section('Learning lab','先预测，再看验证方法')}<div class="pane"><h2 style="margin-top:0">让 Agent 帮你形成可检验的性能直觉</h2><p class="text-body">每个问题背后都对应一个可以在真实 GPU 上做的消融实验。这里不自动提交 GPU 任务，不臆造测量数值。</p>${qs.map((it,i)=>`<div class="questionbox"><b>${String(i+1).padStart(2,'0')} / ${esc(it.q)}</b><p>先自己回答，再揭示解释。</p><button class="btn" data-reveal="${i}">${S.experiment===i?'收起解释':'Reveal reasoning'}</button>${S.experiment===i?`<p style="padding:10px;border-left:2px solid #5accb9">${esc(it.a)}</p>`:''}</div>`).join('')}</div>${section('Guided experiment plan','真正 GPU 采样属于下一阶段')}<div class="pane"><div class="listline"><b>实验 1：Key-split 参数</b><p>固定 input/TP/hardware，比较 S=8/16/32，记录 CTA occupancy、gather、partial scratch 和 merge 次数，验证不同 token 数下收益转折。</p></div><div class="listline"><b>实验 2：MMA Axis 与架构</b><p>研究 SM90 Head-M tiling 与 SM100 Head-N 的硬件约束，不在不同硬件上直接对比绝对数值。</p></div><div class="listline"><b>实验 3：数值补偿</b><p>SGLang 的 BF16 high + residual PV 与无补偿版本，对比 FP64 reference error、模型评测、latency。</p></div></div>${bottom()}`}
-function render(){const x=v();document.title=`Kernel Studio · ${x.name}`;$('#primaryPr').href=x.pr_url;$('#routeTitle').textContent={overview:'WORKLOAD',evolution:'DESIGN EVOLUTION',anatomy:'KERNEL ANATOMY',evidence:'EVIDENCE',experiments:'LEARNING LAB'}[S.view];
+function render(persist=true){const x=v();document.title=`Kernel Studio · ${x.name}`;$('#primaryPr').href=x.pr_url;$('#routeTitle').textContent={overview:'WORKLOAD',evolution:'DESIGN EVOLUTION',anatomy:'KERNEL ANATOMY',evidence:'EVIDENCE',experiments:'LEARNING LAB'}[S.view];
  $$('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
  $$('#variantTabs button').forEach(b=>b.classList.toggle('chosen',b.dataset.variant===S.variant));
- let html={overview,evolution,anatomy,evidence,experiments}[S.view]();$('#view').innerHTML=html;bind();}
+ let html={overview,evolution,anatomy,evidence,experiments}[S.view]();$('#view').innerHTML=html;bind();if(persist)saveState();}
 function bind(){
  $$('#phase,#heads,#swa,#extra').forEach(el=>el.addEventListener('change',e=>{S[el.id]=el.id==='phase'?el.value:Number(el.value);S.inspectSplit=0;render()}));
  const tok=$('#tokens');
@@ -131,11 +150,13 @@ function bind(){
  if(inspect)inspect.addEventListener('change',e=>{S.inspectToken=Number(e.target.value);render()});
  $$('[data-inspect-split]').forEach(b=>b.addEventListener('click',()=>{S.inspectSplit=Number(b.dataset.inspectSplit);render()}));
  $$('[data-mma]').forEach(b=>b.addEventListener('click',()=>{S.mmaView=b.dataset.mma;render()}));
- $$('[data-go]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.go;window.scrollTo({top:0,behavior:'auto'});render()}));
+ $$('[data-go]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.go;window.scrollTo({top:0,behavior:'auto'});saveState(true);render()}));
  $$('[data-reveal]').forEach(b=>b.addEventListener('click',()=>{let id=Number(b.dataset.reveal);S.experiment=S.experiment===id?-1:id;render()}));
 }
-$$('#nav button').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;window.scrollTo({top:0,behavior:'auto'});render()}));
-$$('#variantTabs button').forEach(b=>b.addEventListener('click',()=>{S.variant=b.dataset.variant;S.stage=0;S.heads=16;S.inspectToken=0;S.inspectSplit=0;S.mmaView='qk';render()}));
+$$('#nav button').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;window.scrollTo({top:0,behavior:'auto'});saveState(true);render()}));
+$$('#variantTabs button').forEach(b=>b.addEventListener('click',()=>{S.variant=b.dataset.variant;S.stage=0;S.heads=16;S.inspectToken=0;S.inspectSplit=0;S.mmaView='qk';saveState(true);render()}));
+window.addEventListener('popstate',()=>{if(S.case){restoreState();render(false)}});
+window.addEventListener('hashchange',()=>{if(S.case){restoreState();render(false)}});
 (async()=>{try{
  if(window.__KLA_CASE__){S.case=window.__KLA_CASE__;S.local=window.__KLA_LOCAL__||{};S.pinned=window.__KLA_PINNED__||{}}
  else{
@@ -145,5 +166,5 @@ $$('#variantTabs button').forEach(b=>b.addEventListener('click',()=>{S.variant=b
  }
  const anchor=S.case.walkthrough?.default_workload;
  if(anchor){S.variant=S.case.walkthrough.anchor_variant||S.variant;S.phase=anchor.phase;S.token=anchor.tokens;S.heads=anchor.heads;S.swa=anchor.swa_capacity;S.extra=anchor.extra_capacity;}
- render();
+ restoreState();render();
 }catch(e){$('#view').innerHTML=`<div class="alert">无法加载案例：${esc(e.message)}。请用 <code>python -m kernel_learning serve</code> 启动，而不是直接双击 index.html。</div>`}})();

@@ -27,7 +27,7 @@
 | [vLLM PR #59418](https://github.com/vllm-project/vllm/pull/59418) | `74c0f0e10ac647ee22cf9e2bcd0ee20e40aee343` | SM90，16-head 计算 Tile、Key split、partial/merge 与 fallback |
 | [SGLang PR #39674](https://github.com/sgl-project/sglang/pull/39674) | `b98a4ead5bd337418e8eb5a18e9f5f5a402baac0` | SM100/103，MMA Head-N 映射、64-key Tile、两次 PV 与 merge |
 
-默认例子是 T=4、H=16、SWA=128、Extra=512。页面先定义 selected key 与 32-key block，再推导 20 blocks、16 splits、每个 split 至多 2 blocks；跟踪一个非空 CTA 至第二个 Merge Kernel，最后检查空 split、读取/计算成本及 dispatch。所有演示以固定源码快照为边界，**PR 作者的测量只标作 reported，未标作本项目复测**。研究出处和不能跨硬件比较的原因见[研究备忘](docs/research-notes.md)；旧版教学设计记录见[项目历史](docs/project-history.md)。
+默认例子是 T=4、H=16、SWA=128、Extra=512。页面先定义 selected key 与 32-key block，再推导 20 blocks、16 splits、每个 split 至多 2 blocks；跟踪一个非空 CTA 至第二个 Merge Kernel，最后检查空 split、读取/计算成本及 dispatch。所有演示以固定源码快照为边界，**PR 作者的测量只标作 reported，未标作本项目复测**。研究出处和不能跨硬件比较的原因见[Case 证据索引](cases/dsv41-small-head-decode/evidence/README.md)；旧版教学设计记录见[项目历史](docs/project-history.md)。
 
 ## 本地运行
 
@@ -67,7 +67,7 @@ python -m unittest discover -s tests -v
 
 | 路径 | 作用 |
 | --- | --- |
-| `cases/<case_id>/` | Case JSON、证据和实验记录；研究事实的主要归属地 |
+| `cases/<case_id>/` | Case JSON、成本与来源分析、证据和实验记录；研究事实的主要归属地 |
 | `cases/schema.json` | 当前 Case 数据结构；新增策略要同步更新并测试 |
 | `web/` | 现有案例的页面源码、样式、JS 和固定源码摘录 |
 | `kernel_learning/` | 标准库 CLI、Case 验证、派生模型与离线构建 |
@@ -77,7 +77,7 @@ python -m unittest discover -s tests -v
 | `references/` | 原始 Obsidian Canvas；保留来源，不静默改写 |
 | `.github/` | CI、页面请求表单与 PR 模板 |
 
-`Kernel_Learning_Studio.html`、`web/studio-standalone.html` 和 `web/local-sources.json` 在本机存在，但不进入 Git：前两者可重建，最后一个可能含本地源码。页面发布和统一目录尚未启用。
+`Kernel_Learning_Studio.html` 是可重建的本地 Obsidian 入口，`web/local-sources.json` 可能含本地源码；两者都不进入 Git。页面发布和统一目录尚未启用。
 
 ## 许可证与来源
 

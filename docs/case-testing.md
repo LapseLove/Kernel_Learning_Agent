@@ -12,4 +12,4 @@
 
 目前 Case JSON 的 `variants.<id>.dispatch` 是教学 Gate 与 split 策略的参数源；Python `workload()` 和浏览器 `deriveWorkload()` 分别实现公式，使用变更策略的样例做跨语言一致性检查。`tests/test_contract.py` 负责 schema、推导一致性及导出边界；`tests/test_browser.py` 用 Chromium/Edge 实测离线与服务页面；`tests/test_dsv41.py` 保存首个 Case 的语义和数值边界。新增 Kernel 时至少加入它自己的正常、边界和 fallback 样例；若执行图或控件行为不同，补一条浏览器路径。只有真实 Kernel 可运行时才加入数值与 GPU 测试，不用概念图的自我断言冒充正确性测试。
 
-离线 HTML 是从 `web/` 和 Case 构建的派生文件，Git 忽略；本机用 `python -m kernel_learning build` 更新 Obsidian 入口。`python -m kernel_learning export-html --include-local-sources` 会嵌入本地导入源码，分享前应明确审阅；默认导出不嵌入。
+离线 HTML 是从 `web/` 和 Case 构建的派生文件，Git 忽略；本机用 `python -m kernel_learning build` 更新根目录的 Obsidian 入口。`python -m kernel_learning export-html --include-local-sources` 会嵌入本地导入源码，分享前应明确审阅；默认导出不嵌入。

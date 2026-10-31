@@ -55,7 +55,7 @@ python -m unittest discover -s tests -v
 
 测试组织是**通用合同 + Case 专属正常/边界/fallback 样例 + 必要的浏览器路径**，见[测试约定](docs/case-testing.md)。GPU 数值正确性和性能实验单独记录，不能让无 GPU CI 冒充实测。
 
-`Kernel_Learning_Studio.html`、`web/studio-standalone.html` 是派生物，`web/local-sources.json` 可能含本地源码，均不要提交。PR 中若有页面变化，提供截图或 CI 构建产物，并说明截图是概念图、解释器输出还是实测图。引入第三方代码/图片时保留原始许可和出处。提交的原创贡献按仓库 [Apache-2.0](LICENSE) 发布。
+`Kernel_Learning_Studio.html` 是派生物，`web/local-sources.json` 可能含本地源码，均不要提交。PR 中若有页面变化，提供截图或 CI 构建产物，并说明截图是概念图、解释器输出还是实测图。引入第三方代码/图片时保留原始许可和出处。提交的原创贡献按仓库 [Apache-2.0](LICENSE) 发布。
 
 修改首个案例的 Workload 首屏后，可在安装 Playwright 并运行 `build` 后执行 `python scripts/capture_studio_preview.py` 更新 README 截图；截图属于文档预览，不代表 GPU 测量。
 

@@ -79,16 +79,14 @@ def export_html(case, target: Path, include_local_sources: bool = False):
 
 def build(case, check: bool = False):
     page=render_html(case)
-    targets=(PROJECT/'Kernel_Learning_Studio.html', PROJECT/'web'/'studio-standalone.html')
+    target=PROJECT/'Kernel_Learning_Studio.html'
     if check:
-        stale=[str(p) for p in targets if not p.exists() or p.read_text(encoding='utf-8')!=page]
-        if stale:
-            raise SystemExit('Generated HTML is missing or stale: '+', '.join(stale)+'; run python -m kernel_learning build')
-        print('OK: both standalone HTML files match source and exclude local sources')
+        if not target.exists() or target.read_text(encoding='utf-8')!=page:
+            raise SystemExit(f'Generated HTML is missing or stale: {target}; run python -m kernel_learning build')
+        print('OK: standalone HTML matches source and excludes local sources')
     else:
-        for target in targets:
-            target.write_text(page,encoding='utf-8')
-            print(f'Built {target}')
+        target.write_text(page,encoding='utf-8')
+        print(f'Built {target}')
 
 def main():
     parser=argparse.ArgumentParser(description='Kernel Learning Harness · evidence-first case explorer')
@@ -97,7 +95,7 @@ def main():
     sv=sub.add_parser('serve');sv.add_argument('--port',type=int,default=8765)
     ex=sub.add_parser('export-html');ex.add_argument('--output',type=Path,default=PROJECT/'Kernel_Learning_Studio.html')
     ex.add_argument('--include-local-sources',action='store_true',help='Explicitly embed imported local source excerpts; review before sharing')
-    build_parser=sub.add_parser('build',help='Regenerate both local standalone HTML entry points')
+    build_parser=sub.add_parser('build',help='Regenerate the local standalone HTML entry point')
     build_parser.add_argument('--check',action='store_true')
     imp=sub.add_parser('import-source');imp.add_argument('--repo',choices=('vllm','sglang'),required=True)
     imp.add_argument('--root',required=True,type=Path);imp.add_argument('--allow-mismatch',action='store_true')

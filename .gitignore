@@ -5,7 +5,6 @@ __pycache__/
 .DS_Store
 web/local-sources.json
 Kernel_Learning_Studio.html
-web/studio-standalone.html
 *.zip
 dist/
 playwright-report/

@@ -31,3 +31,14 @@ jobs:
           python -m kernel_learning build --check
       - name: Run contract and browser interactions
         run: python -m unittest discover -s tests -v
+      - name: Capture review screenshot
+        run: python scripts/capture_studio_preview.py --output dist/studio-overview.png
+      - name: Upload offline Studio for review
+        uses: actions/upload-artifact@v7
+        with:
+          name: studio-offline
+          path: |
+            Kernel_Learning_Studio.html
+            dist/studio-overview.png
+          if-no-files-found: error
+          retention-days: 14

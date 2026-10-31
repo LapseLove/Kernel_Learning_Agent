@@ -1,0 +1,30 @@
+name: 报告来源或教学错误
+description: 提供能定位到固定版本的反例，帮助修正 Case、公式或页面。
+title: "[Correction] "
+body:
+  - type: input
+    id: location
+    attributes:
+      label: 页面或 Case 位置
+      placeholder: "case_id、章节、URL 或文件路径"
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: 当前说法及问题
+      description: 引用最短必要文字，说明哪个输入或边界会使其不成立。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 固定版本的证据或复现步骤
+      description: 优先附仓库 SHA、文件与行号；若是实测，附环境和方法。
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: 建议的修正
+      description: 可以只指出方向，维护者会进一步核查。

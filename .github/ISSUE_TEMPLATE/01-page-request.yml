@@ -1,0 +1,51 @@
+name: 请求一个 Kernel 学习页面
+description: 提出值得解释的算子/实现，邀请他人共同核查来源、建模和制作页面。
+title: "[Page Request] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不需要 GPU 或完整 HTML。请先描述你希望工程师学会判断什么；未知条件写“未知”，不要猜测。
+  - type: input
+    id: subject
+    attributes:
+      label: 算子或 Kernel
+      description: 尽可能写清模型/框架/实现名称；可以暂时不知道具体函数名。
+      placeholder: "例如：某模型 decode 阶段的 paged attention"
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: 这个页面最应回答什么工程问题？
+      description: 说明为什么这个问题值得研究，以及读者应能做出的判断。
+      placeholder: "例如：何时触发专用路径？每个 CTA 负责哪些 key？"
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: 已知工作负载与适用条件
+      description: 模型版本、prefill/decode/verify、GPU/SM、TP/EP、token、head、dtype、KV 布局；未知项可留空。
+  - type: textarea
+    id: sources
+    attributes:
+      label: 已知来源
+      description: PR、论文、官方说明或具体文件链接；如有 SHA 请附上。
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: 你希望怎样参与？
+      options:
+        - 我只提出问题，欢迎其他人认领
+        - 我可以核查源码或提供材料
+        - 我可以做成本模型或测试
+        - 我可以制作页面草图或交互
+        - 我已有草稿，希望共同完成
+    validations:
+      required: true
+  - type: textarea
+    id: help
+    attributes:
+      label: 希望其他人帮忙的具体部分
+      description: 例如找到框架入口、核算读取量、审查 warp 映射或测试页面。

@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "provenance": "raw.githubusercontent.com at each pinned commit; excerpt lines are copied verbatim",
+  "variants": {
+    "vllm": {
+      "commit": "74c0f0e10ac647ee22cf9e2bcd0ee20e40aee343",
+      "stages": {
+        "gate": {
+          "file": "vllm/models/deepseek_v41/nvidia/flashmla.py",
+          "start": 264,
+          "end": 285,
+          "blob_sha": "5df39b4f3032214a27f879950a7696e2cf5252d6",
+          "code": "        if self._use_small_head_decode:\n            assert swa_indices is not None\n            max_keys = swa_indices.shape[-1]\n            if topk_indices is not None:\n                max_keys += topk_indices.shape[-1]\n            use_small_head = small_head_decode_supported(num_decode_tokens, max_keys)\n        else:\n            use_small_head = False\n        if use_small_head:\n            small_head_sparse_decode(\n                q=q,\n                swa_cache=self.swa_cache_layer.kv_cache,\n                swa_indices=swa_indices,\n                swa_lens=swa_lens,\n                extra_cache=None if swa_only else kv_cache,\n                extra_indices=topk_indices,\n                extra_lens=topk_lens,\n                attn_sink=self.attn_sink,\n                sm_scale=self.scale,\n                out=output,\n                num_heads=self.n_local_heads,\n            )"
+        },
+        "kv": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 46,
+          "end": 83,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "    offs = key_offs + tl.arange(0, BLOCK_N)\n    in_range = offs < limit\n    token = tl.load(indices_ptr + idx_base + offs, mask=in_range, other=-1)\n    valid = in_range & (token >= 0)\n    safe = tl.where(valid, token, 0)\n    page = (safe // page_size).to(tl.int64)\n    row = (safe % page_size).to(tl.int64)\n    page_base = cache_ptr + page * page_stride\n    data_base = page_base + row * 576\n\n    d = tl.arange(0, 512)\n    is_nope = d < 448\n    raw = tl.load(\n        data_base[:, None] + d[None, :],\n        mask=valid[:, None] & is_nope[None, :],\n        other=0,\n    )\n    nope = raw.to(tl.float8e4nv, bitcast=True).to(tl.float32)\n\n    t = tl.arange(0, 8)\n    enc = tl.load(\n        (page_base + page_size * 576 + row * 8)[:, None] + t[None, :],\n        mask=valid[:, None] & (t[None, :] < 7),\n        other=127,\n    )\n    scale = tl.exp2(enc.to(tl.float32) - 127.0)\n    nope = tl.reshape(\n        tl.reshape(nope, (BLOCK_N, 8, 64)) * scale[:, :, None], (BLOCK_N, 512)\n    )\n\n    rope_ptr = (data_base + 448).to(tl.pointer_type(tl.bfloat16))\n    rope = tl.load(\n        rope_ptr[:, None] + (d - 448)[None, :],\n        mask=valid[:, None] & ~is_nope[None, :],\n        other=0.0,\n    )\n    k = tl.where(is_nope[None, :], nope, rope.to(tl.float32))\n    return k.to(tl.bfloat16), valid"
+        },
+        "split": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 122,
+          "end": 159,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "\n    qk_scale = sm_scale * 1.4426950408889634\n    m_i = tl.full([BLOCK_H], float(\"-inf\"), dtype=tl.float32)\n    l_i = tl.zeros([BLOCK_H], dtype=tl.float32)\n    acc = tl.zeros([BLOCK_H, 512], dtype=tl.float32)\n\n    swa_len = tl.load(swa_lens_ptr + tok)\n    swa_blocks = tl.cdiv(swa_len, BLOCK_N)\n    num_blocks = swa_blocks\n    extra_len = 0\n    if HAS_EXTRA:\n        extra_len = tl.load(extra_lens_ptr + tok)\n        num_blocks += tl.cdiv(extra_len, BLOCK_N)\n    blocks_per_split = tl.cdiv(num_blocks, NUM_SPLITS)\n    start_block = split * blocks_per_split\n    end_block = tl.minimum(start_block + blocks_per_split, num_blocks)\n\n    for blk in range(start_block, end_block):\n        if blk < swa_blocks:\n            k, valid = _load_kv_block(\n                swa_cache_ptr,\n                swa_page_stride,\n                swa_page_size,\n                swa_indices_ptr,\n                tok.to(tl.int64) * swa_indices_stride,\n                swa_len,\n                blk * BLOCK_N,\n                BLOCK_N,\n            )\n        else:\n            k, valid = _load_kv_block(\n                extra_cache_ptr,\n                extra_page_stride,\n                extra_page_size,\n                extra_indices_ptr,\n                tok.to(tl.int64) * extra_indices_stride,\n                extra_len,\n                (blk - swa_blocks) * BLOCK_N,"
+        },
+        "qk": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 162,
+          "end": 180,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "        s = tl.dot(q, tl.trans(k)) * qk_scale\n        s = tl.where(valid[None, :], s, float(\"-inf\"))\n\n        m_new = tl.maximum(m_i, tl.max(s, 1))\n        m_safe = tl.where(m_new == float(\"-inf\"), 0.0, m_new)\n        alpha = tl.exp2(m_i - m_safe)\n        p = tl.exp2(s - m_safe[:, None])\n        l_i = l_i * alpha + tl.sum(p, 1)\n        acc = acc * alpha[:, None] + tl.dot(p.to(tl.bfloat16), k)\n        m_i = m_new\n\n    empty = l_i == 0.0\n    # log2-domain LSE; -inf marks a split that saw no valid key.\n    lse = tl.where(empty, float(\"-inf\"), m_i + tl.log2(tl.where(empty, 1.0, l_i)))\n    acc = acc * tl.where(empty, 0.0, 1.0 / l_i)[:, None]\n\n    part = (tok.to(tl.int64) * NUM_SPLITS + split) * BLOCK_H\n    tl.store(part_o_ptr + (part + h[:, None]) * 512 + d[None, :], acc)\n    tl.store(part_lse_ptr + part + h, lse)"
+        },
+        "merge": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 194,
+          "end": 215,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "    tok = tl.program_id(0)\n    head = tl.program_id(1)\n    d = tl.arange(0, 512)\n    s = tl.arange(0, NUM_SPLITS)\n    part = (tok.to(tl.int64) * NUM_SPLITS + s) * BLOCK_H + head\n    lse = tl.load(part_lse_ptr + part)\n    m = tl.max(lse, 0)\n    m_safe = tl.where(m == float(\"-inf\"), 0.0, m)\n    w = tl.exp2(lse - m_safe)\n    denom = tl.sum(w, 0)\n    has_keys = denom > 0.0\n    safe_denom = tl.where(has_keys, denom, 1.0)\n    o = tl.sum(tl.load(part_o_ptr + part[:, None] * 512 + d[None, :]) * w[:, None], 0)\n\n    total_lse2 = m_safe + tl.log2(safe_denom)\n    sink2 = tl.load(sink_ptr + head) * 1.4426950408889634\n    # exp(lse) / (exp(lse) + exp(sink)), evaluated in log2 space.\n    o = o / safe_denom / (1.0 + tl.exp2(sink2 - total_lse2))\n    o = tl.where(has_keys, o, 0.0)\n    tl.store(\n        out_ptr + tok.to(tl.int64) * out_stride_t + head * out_stride_h + d,\n        o.to(out_ptr.dtype.element_ty),"
+        },
+        "config": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 224,
+          "end": 239,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "\ndef _max_supported_tokens(max_keys: int) -> int:\n    return _SHORT_KEYS_MAX_TOKENS if max_keys <= _SHORT_KEYS else _LONG_KEYS_MAX_TOKENS\n\n\ndef small_head_decode_supported(num_tokens: int, max_keys: int) -> bool:\n    return num_tokens <= _max_supported_tokens(max_keys)\n\n\ndef _pick_config(num_tokens: int, max_keys: int) -> tuple[int, int, int, int]:\n    if max_keys > _SHORT_KEYS:\n        if num_tokens <= 3:\n            return 32, 32, 4, 2\n        if num_tokens <= 7:\n            return 16, 32, 8, 2\n    return 8, 32, 8, 2"
+        },
+        "warmup": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 374,
+          "end": 393,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": "def register_small_head_decode_warmup(\n    *,\n    num_heads: int,\n    has_extra: bool,\n    swa_widths: tuple[int, ...],\n    topk: int,\n    swa_page_size: int,\n    extra_page_size: int,\n) -> None:\n    \"\"\"Compile every kernel variant ``small_head_sparse_decode`` can dispatch.\"\"\"\n    for swa_width in swa_widths:\n        _launch_partial_decode.register_warmup(\n            num_heads=num_heads,\n            has_extra=has_extra,\n            swa_width=swa_width,\n            topk=topk,\n            swa_page_size=swa_page_size,\n            extra_page_size=extra_page_size,\n        )\n    _launch_merge_splits.register_warmup()"
+        },
+        "mapping": {
+          "file": "vllm/models/deepseek_v41/nvidia/ops/small_head_sparse_decode.py",
+          "start": 320,
+          "end": 336,
+          "blob_sha": "81d17fc701e62cd4820ba155ae9974e256936d5c",
+          "code": ") -> DispatchSpec:\n    num_splits, block_n, num_warps, num_stages = _pick_config(num_tokens, max_keys)\n    return (num_tokens, num_splits), dict(\n        q_stride_t=q.stride(0),\n        q_stride_h=q.stride(1),\n        swa_page_stride=swa_cache.stride(0),\n        swa_page_size=swa_cache.shape[1],\n        swa_indices_stride=swa_indices.stride(0),\n        extra_page_stride=extra_cache.stride(0),\n        extra_page_size=extra_cache.shape[1],\n        extra_indices_stride=extra_indices.stride(0),\n        HAS_EXTRA=has_extra,\n        BLOCK_H=_HEAD_BLOCK,\n        BLOCK_N=block_n,\n        NUM_SPLITS=num_splits,\n        num_warps=num_warps,\n        num_stages=num_stages,"
+        }
+      }
+    },
+    "sglang": {
+      "commit": "b98a4ead5bd337418e8eb5a18e9f5f5a402baac0",
+      "stages": {
+        "gate": {
+          "file": "python/sglang/srt/layers/attention/deepseek_v4_backend.py",
+          "start": 3909,
+          "end": 3939,
+          "blob_sha": "7ca0674eaa6bcb2518c2cd847e72018fa018c695",
+          "code": "            if (\n                get_platform().is_sm100\n                and 0 < q.shape[0] <= 8\n                and layer.tp_q_head_num == 16\n                and q.dtype == torch.bfloat16\n                and q.shape[-1] == 512\n                and self.head_dim_v == 512\n                and self.softmax_scale == 512**-0.5\n                and swa_k_cache.shape[-1] == 584\n                and (extra_k_cache is None or extra_k_cache.shape[-1] == 584)\n                and (\n                    forward_batch.forward_mode.is_decode()\n                    or forward_batch.forward_mode.is_target_verify()\n                    or forward_batch.forward_mode.is_draft_extend_v2()\n                )\n            ):\n                from sglang.kernels.ops.attention.dsv4.swapab_attention import (\n                    swapab_attention,\n                )\n\n                # Put the 16 real TP4 heads in the MMA N dimension. The caller\n                # applies inverse RoPE to the BF16 result as on the FlashMLA path.\n                return swapab_attention(\n                    q[..., :16, :],\n                    swa_k_cache,\n                    swa_page_indices,\n                    swa_topk_lengths,\n                    attn_sink,\n                    extra_k_cache,\n                    extra_indices,\n                    extra_topk_lengths,"
+        },
+        "gather": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_gluon.py",
+          "start": 20,
+          "end": 36,
+          "blob_sha": "0944cd9c4ffafbb24f1084d13ceca68f85bf2da2",
+          "code": "    d = gl.arange(0, 512, gl.SliceLayout(0, KV_LAYOUT))\n    base = (ids // PAGE).to(gl.int64)[:, None] * STRIDE\n    slot = (ids % PAGE)[:, None]\n    mask = valid[:, None] & (d[None, :] < 448)\n    bits = gl.load(CACHE + base + slot * 576 + d[None, :], mask, 0)\n    fp8 = bits.to(gl.float8e4nv, bitcast=True).to(gl.float32)\n    exponent = gl.load(\n        CACHE + base + PAGE * 576 + slot * 8 + d[None, :] // 64, mask, 0\n    ).to(gl.int32)\n    scale = gl.where(exponent == 0, 0x00400000, exponent << 23).to(\n        gl.float32, bitcast=True\n    )\n    rope_ptr = (CACHE + base + slot * 576 + 448 + (d[None, :] - 448) * 2).to(\n        gl.pointer_type(gl.bfloat16)\n    )\n    rope = gl.load(rope_ptr, valid[:, None] & (d[None, :] >= 448), 0)\n    return gl.where(d[None, :] < 448, fp8 * scale, rope.to(gl.float32)).to(gl.bfloat16)"
+        },
+        "tiling": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_gluon.py",
+          "start": 91,
+          "end": 112,
+          "blob_sha": "0944cd9c4ffafbb24f1084d13ceca68f85bf2da2",
+          "code": "        gl.bfloat16,\n        [H, 512],\n        gl.NVMMASharedLayout(swizzle_byte_width=128, element_bitwidth=16),\n        value=q,\n    )\n    kv_smem = gl.allocate_shared_memory(\n        gl.bfloat16,\n        [BT, 512],\n        gl.NVMMASharedLayout(swizzle_byte_width=128, element_bitwidth=16),\n        value=kv,\n    )\n    score_tmem = allocate_tensor_memory(\n        gl.float32, [BT, H], TensorMemoryLayout(block=(BT, H), col_stride=1)\n    )\n    bar = gl.allocate_shared_memory(gl.int64, [1], mbarrier.MBarrierLayout())\n    mbarrier.init(bar, count=1)\n    fence_async_shared()\n    tcgen05_mma(kv_smem, q_smem.permute((1, 0)), score_tmem, use_acc=False)\n    tcgen05_commit(bar)\n    mbarrier.wait(bar, phase=0)\n    score_layout: gl.constexpr = get_tmem_reg_layout(\n        gl.float32, (BT, H), TensorMemoryLayout(block=(BT, H), col_stride=1), 4",
+          "views": {
+            "pv": {
+              "file": "python/sglang/kernels/ops/attention/dsv4/swapab_gluon.py",
+              "start": 128,
+              "end": 143,
+              "blob_sha": "0944cd9c4ffafbb24f1084d13ceca68f85bf2da2",
+              "code": "    # Four native M=128 tiles cover all 512 V channels. The N dimension remains\n    # exactly 16 heads; this is the swapAB orientation from the source template.\n    out_tmem = allocate_tensor_memory(\n        gl.float32, [512, H], TensorMemoryLayout(block=(128, H), col_stride=1)\n    )\n    fence_async_shared()\n    tcgen05_mma(kv_smem.permute((1, 0)), p_smem, out_tmem, use_acc=False)\n    tcgen05_commit(bar)\n    mbarrier.wait(bar, phase=1)\n    if COMPENSATE:\n        p_lo = (prob - p_hi.to(gl.float32)).to(gl.bfloat16)\n        p_smem.store(p_lo)\n        fence_async_shared()\n        tcgen05_mma(kv_smem.permute((1, 0)), p_smem, out_tmem, use_acc=True)\n        tcgen05_commit(bar)\n        mbarrier.wait(bar, phase=0)"
+            }
+          }
+        },
+        "softmax": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_gluon.py",
+          "start": 113,
+          "end": 143,
+          "blob_sha": "0944cd9c4ffafbb24f1084d13ceca68f85bf2da2",
+          "code": "    )\n    scores = score_tmem.load(score_layout) * SCALE\n    valid = gl.convert_layout(valid, gl.SliceLayout(1, score_layout))\n    scores = gl.where(valid[:, None], scores, -float(\"inf\"))\n    mx = gl.max(scores, 0)\n    mx = gl.where(mx == -float(\"inf\"), 0.0, mx)\n    prob = gl.exp(scores - mx[None, :])\n    denom = gl.sum(prob, 0)\n    p_hi = prob.to(gl.bfloat16)\n    p_smem = gl.allocate_shared_memory(\n        gl.bfloat16,\n        [BT, H],\n        gl.NVMMASharedLayout(swizzle_byte_width=32, element_bitwidth=16),\n        value=p_hi,\n    )\n    # Four native M=128 tiles cover all 512 V channels. The N dimension remains\n    # exactly 16 heads; this is the swapAB orientation from the source template.\n    out_tmem = allocate_tensor_memory(\n        gl.float32, [512, H], TensorMemoryLayout(block=(128, H), col_stride=1)\n    )\n    fence_async_shared()\n    tcgen05_mma(kv_smem.permute((1, 0)), p_smem, out_tmem, use_acc=False)\n    tcgen05_commit(bar)\n    mbarrier.wait(bar, phase=1)\n    if COMPENSATE:\n        p_lo = (prob - p_hi.to(gl.float32)).to(gl.bfloat16)\n        p_smem.store(p_lo)\n        fence_async_shared()\n        tcgen05_mma(kv_smem.permute((1, 0)), p_smem, out_tmem, use_acc=True)\n        tcgen05_commit(bar)\n        mbarrier.wait(bar, phase=0)"
+        },
+        "splits": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_attention.py",
+          "start": 81,
+          "end": 119,
+          "blob_sha": "ec05e89660ce855c462e50eb5811f845fbc656ba",
+          "code": "    kv, extra_kv = kv.view(torch.uint8), extra_kv.view(torch.uint8)\n    kt = triton.cdiv(nk, block)\n    nt = kt + triton.cdiv(ne, block)\n    partial = torch.empty((b, nt, h, 512), dtype=torch.float32, device=q.device)\n    maximum = torch.empty((b, nt, h), dtype=torch.float32, device=q.device)\n    sums = torch.empty_like(maximum)\n    out = torch.empty((b, h, 512), dtype=q.dtype, device=q.device)\n    partial_gluon[(b, nt)](\n        q,\n        kv,\n        extra_kv,\n        indices,\n        extra_indices,\n        lengths,\n        extra_lengths,\n        partial,\n        maximum,\n        sums,\n        QS=q.stride(0),\n        QH=q.stride(-2),\n        IS=indices.stride(0),\n        EIS=extra_indices.stride(0),\n        KP=kv.shape[1],\n        KS=kv.stride(0),\n        EP=extra_kv.shape[1],\n        ES=extra_kv.stride(0),\n        NK=nk,\n        NE=ne,\n        NT=nt,\n        KT=kt,\n        BT=block,\n        H=h,\n        SCALE=512**-0.5,\n        KTOKENS=kv.shape[0] * kv.shape[1],\n        ETOKENS=extra_kv.shape[0] * extra_kv.shape[1],\n        COMPENSATE=True,\n        SWAP_AB=True,\n        num_warps=4,\n    )"
+        },
+        "merge": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_attention.py",
+          "start": 24,
+          "end": 41,
+          "blob_sha": "ec05e89660ce855c462e50eb5811f845fbc656ba",
+          "code": "    b, h, tile = tl.program_id(0), tl.program_id(1), tl.program_id(2)\n    t, d = tl.arange(0, ST), tile * BD + tl.arange(0, BD)\n    den = tl.load(SUM + (b * NT + t) * H + h, t < NT, 0)\n    mx = tl.load(MAX + (b * NT + t) * H + h, t < NT, 0)\n    mx = tl.where(den > 0, mx, -float(\"inf\"))\n    sink = tl.load(SINK + h)\n    m = tl.maximum(tl.max(mx, 0), sink)\n    m = tl.where(tl.abs(m) == float(\"inf\"), 0.0, m)\n    factor = tl.exp(mx - m)\n    denominator = tl.sum(den * factor, 0) + tl.exp(sink - m)\n    vals = tl.load(\n        PART + ((b * NT + t[:, None]) * H + h) * 512 + d[None, :],\n        t[:, None] < NT,\n        0,\n    )\n    out = tl.sum(vals * factor[:, None], 0) / denominator\n    out = tl.where((denominator > 0) & (sink != float(\"inf\")), out, 0.0)\n    tl.store(OUT + (b * H + h) * 512 + d, out)"
+        },
+        "mapping": {
+          "file": "python/sglang/kernels/ops/attention/dsv4/swapab_gluon.py",
+          "start": 71,
+          "end": 89,
+          "blob_sha": "0944cd9c4ffafbb24f1084d13ceca68f85bf2da2",
+          "code": "    gl.static_assert(SWAP_AB and H == 16 and (BT == 64 or BT == 128))\n    b, t = gl.program_id(0), gl.program_id(1)\n    kv_layout: gl.constexpr = gl.BlockedLayout([1, 8], [4, 8], [4, 1], [1, 0])\n    n = gl.arange(0, BT, gl.SliceLayout(1, kv_layout))\n    if t < KT:\n        at = t * BT + n\n        length = gl.load(L + b)\n        ids = gl.load(IDX + b * IS + at, at < NK, -1)\n        valid = (at < NK) & (at < length) & (ids >= 0) & (ids < KTOKENS)\n        kv = _load_v4(K, gl.maximum(ids, 0), valid, KP, KS, kv_layout)\n    else:\n        at = (t - KT) * BT + n\n        length = gl.load(EL + b)\n        ids = gl.load(EI + b * EIS + at, at < NE, -1)\n        valid = (at < NE) & (at < length) & (ids >= 0) & (ids < ETOKENS)\n        kv = _load_v4(E, gl.maximum(ids, 0), valid, EP, ES, kv_layout)\n    qh = gl.arange(0, H, gl.SliceLayout(1, kv_layout))\n    qd = gl.arange(0, 512, gl.SliceLayout(0, kv_layout))\n    q = gl.load(Q + b * QS + qh[:, None] * QH + qd[None, :])"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Kernel Learning Studio · DSv4.1</title>
+<link rel="stylesheet" href="/style.css"></head><body>
+<div id="app" class="app">
+  <aside class="rail">
+    <div class="brand"><div class="brand-mark">K<span>·</span></div><div><strong>Kernel Learning</strong><small>ENGINEERING STUDIO <span class="ver">α 0.3</span></small></div></div>
+    <div class="rail-kicker">ACTIVE CASE</div>
+    <div class="active-case"><span class="tiny-label">01 / CASE STUDY</span><b>DSv4.1</b><strong>Small-head Sparse Decode</strong><span class="tags"><em>MLA</em><em>TP</em><em>Decode</em></span></div>
+    <div class="rail-kicker">EXPLORE</div>
+    <nav id="nav">
+      <button data-view="overview" class="active"><span>◇</span> Workload & Bottleneck</button>
+      <button data-view="evolution"><span>⑂</span> Design Evolution</button>
+      <button data-view="anatomy"><span>⌘</span> Kernel Anatomy</button>
+      <button data-view="evidence"><span>▤</span> Evidence & Benchmark</button>
+      <button data-view="experiments"><span>◈</span> Learning Lab</button>
+    </nav>
+    <div class="rail-bottom"><span class="status-dot"></span> Evidence-first · Commit pinned<br><small>本地原型 · 无 GPU/网络依赖</small></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div><span class="crumb">CASES</span><span class="sep">/</span><span class="crumb">DEEPSEEK V4.1</span><span class="sep">/</span><b id="routeTitle">WORKLOAD</b></div><div class="topright"><span class="status-dot"></span> snapshot 2026-10-27 <span class="slash">│</span> <a id="primaryPr" target="_blank" rel="noopener noreferrer" href="#">View PR ↗</a></div></header>
+    <main id="main">
+      <div class="hero"><div class="eyebrow">ENGINEERING CASE STUDY <span>01</span></div><h1>Small-head <em>Sparse Decode</em></h1><p>从 64-head padding 的性能空洞，追踪两个框架如何分别在 Hopper 与 Blackwell 上找到不同的实现路径。</p></div>
+      <div id="variantTabs" class="variant-tabs"><button data-variant="vllm" class="chosen"><span class="dot teal"></span><strong>vLLM</strong> <small>SM90 · H20</small></button><button data-variant="sglang"><span class="dot purple"></span><strong>SGLang</strong> <small>SM100/103 · GB300</small></button><div class="variant-spacer"></div><span class="snapshot">Source pinned by SHA</span></div>
+      <div id="view"></div>
+    </main>
+  </div>
+</div>
+<script defer src="/model.js"></script>
+<script defer src="/anatomy.js"></script>
+<script defer src="/app.js"></script>
+</body></html>

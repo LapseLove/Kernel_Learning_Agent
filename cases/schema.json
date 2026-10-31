@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZhouMaomaoZhou/Kernel_Learning_Agent/blob/main/cases/schema.json",
+  "title": "Kernel Learning Case",
+  "type": "object",
+  "required": ["schema_version", "case_id", "name", "variants", "walkthrough", "cost_model"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "name": {"type": "string", "minLength": 1},
+    "variants": {
+      "type": "object", "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/variant"}
+    },
+    "walkthrough": {
+      "type": "object", "required": ["anchor_variant", "default_workload", "teaching_order"],
+      "properties": {
+        "anchor_variant": {"type": "string"},
+        "default_workload": {
+          "type": "object", "required": ["phase", "tokens", "heads", "swa_capacity", "extra_capacity"],
+          "properties": {
+            "phase": {"type": "string"},
+            "tokens": {"type": "integer", "minimum": 1},
+            "heads": {"type": "integer", "minimum": 1},
+            "swa_capacity": {"type": "integer", "minimum": 0},
+            "extra_capacity": {"type": "integer", "minimum": 0}
+          }
+        },
+        "teaching_order": {"type": "array", "minItems": 1}
+      }
+    },
+    "cost_model": {"type": "object"}
+  },
+  "$defs": {
+    "source": {
+      "type": "object", "required": ["file", "start", "end"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "start": {"type": "integer", "minimum": 1},
+        "end": {"type": "integer", "minimum": 1}
+      }
+    },
+    "stage": {
+      "type": "object", "required": ["id", "title", "description", "source", "visual", "why", "check"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "source": {"$ref": "#/$defs/source"},
+        "visual": {"enum": ["conceptual", "interpreter", "hardware-measured"]},
+        "why": {"type": "string"},
+        "check": {"type": "string"}
+      }
+    },
+    "variant": {
+      "type": "object", "required": ["name", "repo", "pr_url", "commit", "dispatch", "reported", "stages"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "repo": {"type": "string", "pattern": "^https://github\\.com/"},
+        "pr_url": {"type": "string", "pattern": "^https://github\\.com/"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "dispatch": {"type": "object", "required": ["sm", "heads", "dtype", "mode"]},
+        "reported": {"type": "object", "required": ["status", "environment", "metric"]},
+        "stages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stage"}}
+      }
+    }
+  }
+}

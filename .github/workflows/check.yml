@@ -1,0 +1,33 @@
+name: Check Case and Studio
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Check source and model
+        run: |
+          python -m kernel_learning validate
+          node --check web/model.js
+          node --check web/anatomy.js
+          node --check web/app.js
+      - name: Build offline entry points
+        run: |
+          python -m kernel_learning build
+          python -m kernel_learning build --check
+      - name: Run contract and browser interactions
+        run: python -m unittest discover -s tests -v

@@ -6,7 +6,7 @@
 
 - Issue：
 - `case_id`：
-- 模型/框架/阶段/硬件与源码 SHA：
+- 领域、适用场景与固定源码版本：
 
 ## 关键主张与证据
 
@@ -25,9 +25,9 @@
 ## 页面、测试与边界
 
 - 变更范围与页面预览/截图：
-- 正常输入、边界输入、fallback 样例：
+- 正常路径和一个条件变化后的结果：
 - 已运行的检查及结果：
-- 未运行或需要 GPU 的检查：
+- 未运行的检查与原因：
 - 是否新增第三方源码/图片及其许可证：
 
-<!-- 页面 PR 请同时查看 CONTRIBUTING.md 和 docs/lesson-design.md。生成的离线 HTML 与 web/local-sources.json 不提交。 -->
+<!-- 页面 PR 请查看 CONTRIBUTING.md 和 workflows/technical-learning.md。分享 HTML 前审阅是否嵌入本地源码。 -->

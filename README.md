@@ -1,84 +1,75 @@
-# Kernel Learning Agent
+# Technical Learning Studio
 
-把推理 Kernel 变成可核查、可交互的工程学习案例：**为什么需要它、工作怎样映射到硬件、适用边界在哪里、怎样验证结论**。
+把复杂的技术机制做成可读、可追踪、可验证的学习材料。选一个真实问题，从设计动机追到一次完整调用，再沿关键分支下钻到源码和证据。
 
-*Evidence-first, source-pinned, interactive case studies for inference kernels.*
+[工作流](workflows/technical-learning.md) · [学习案例](#学习案例) · [本地运行](#本地运行) · [贡献指南](CONTRIBUTING.md)
 
-> **当前阶段：单案例教学原型。** 已有一个 DeepSeek V4.1 small-head sparse decode 页面、Case 数据、成本模型、源码映射和测试。页面中的 CTA 图是概念推导；本项目尚无 GPU 实测，也尚未实现“填入任意 Kernel 即自动生成页面”的通用生成器。
+## 工作流
 
-![首个 Case 的 Workload 页面截图；图示为概念模型，不是 GPU Trace](docs/assets/studio-overview.png)
+**核查证据 → 规划讲解 → 选择表达 → 审查与迭代**
 
-## 先看什么
+1. **核查证据。** 固定版本和边界，从真实入口走完一个例子，再改变一个条件核对分支。领域模块补齐该问题特有的事实。
+2. **规划讲解。** 先列知识地图，按读者掌握程度分配简讲、细讲和按需展开。先回答是什么、为什么，再用同一个例子讲完整路径、决策和实现。
+3. **选择表达。** 讲义沿提纲交付。HTML 每节围绕一个问题，用主图呈现关系，把源码与证据放在相关机制旁；需要跟踪状态变化时才加步进。
+4. **审查与迭代。** 核对结论、真实路径与反例。HTML 另外走读页面，在桌面和窄屏检查布局、交互和阅读顺序。按读者第一次卡住的位置修复并复查。
 
-| 入口 | 用途 |
-| --- | --- |
-| [首个 Case](cases/dsv41-small-head-decode/case.json) | 固定 workload、两条实现路线、来源与教学顺序 |
-| [本地运行](#本地运行) | 打开交互页面、导出离线 HTML |
-| [请求一个页面](https://github.com/ZhouMaomaoZhou/Kernel_Learning_Agent/issues/new?template=01-page-request.yml) | 提出你想研究的 Kernel；只提供问题也可以 |
-| [贡献指南](CONTRIBUTING.md) | 提交证据、纠错、页面与 PR 的方式 |
-| [社区路线图](docs/community-roadmap.md) | 多页面架构、CI、规模化审核计划 |
+## Skill 目录
 
-## 首个案例
-
-**DeepSeek V4.1 small-head sparse decode** 研究两个有相近问题、却不可直接横比的实现：
-
-| 实现 | 固定版本 | 本案例关注点 |
+| 层 | 放什么 | 何时加载 |
 | --- | --- | --- |
-| [vLLM PR #59418](https://github.com/vllm-project/vllm/pull/59418) | `74c0f0e10ac647ee22cf9e2bcd0ee20e40aee343` | SM90，16-head 计算 Tile、Key split、partial/merge 与 fallback |
-| [SGLang PR #39674](https://github.com/sgl-project/sglang/pull/39674) | `b98a4ead5bd337418e8eb5a18e9f5f5a402baac0` | SM100/103，MMA Head-N 映射、64-key Tile、两次 PV 与 merge |
+| `skills/core/` | [来源核查](skills/core/source-evidence/SKILL.md) · [讲解规划](skills/core/lesson-plan/SKILL.md) · [技术审查](skills/core/technical-review/SKILL.md) | 按当前阶段加载 |
+| `skills/domains/` | [Kernel 分析](workflows/technical-learning.md#按问题接入领域-skill) · [项目拆解](skills/domains/project/project-breakdown/SKILL.md) · [Runtime 集成](skills/domains/runtime/runtime-integration/SKILL.md) | 按学习问题选取；混合案例可以组合 |
+| `skills/formats/html/` | [视觉设计](skills/formats/html/visual-design/SKILL.md) · [步进场景](skills/formats/html/scene-author/SKILL.md) · [视觉审查](skills/formats/html/visual-review/SKILL.md) | 交付 HTML 时按需加载 |
 
-默认例子是 T=4、H=16、SWA=128、Extra=512。页面先定义 selected key 与 32-key block，再推导 20 blocks、16 splits、每个 split 至多 2 blocks；跟踪一个非空 CTA 至第二个 Merge Kernel，最后检查空 split、读取/计算成本及 dispatch。所有演示以固定源码快照为边界，**PR 作者的测量只标作 reported，未标作本项目复测**。研究出处和不能跨硬件比较的原因见[Case 证据索引](cases/dsv41-small-head-decode/evidence/README.md)；旧版教学设计记录见[项目历史](docs/project-history.md)。
+例如，“这个工具如何收录和查询 PR？”用项目拆解，分别跟踪维护者和使用者。“输入变长时为什么切换实现？”用 kernel 的 intake、model 和 explain。“kern 为什么接入 vLLM？”用 runtime 集成，从注册与绑定追到结果交回；要看某个算子的线程分工时再加 kernel 模块。
+
+[AGENTS.md](AGENTS.md) 是执行入口，[工作流](workflows/technical-learning.md) 保存完整路由和交接约定。新场景先走通一个真实案例，再把可复用的领域判断放到独立 skill，沿用共用的证据和提纲。
+
+## 学习案例
+
+| 案例 | 一条值得走的路径 | 资料 |
+| --- | --- | --- |
+| Small-head sparse decode | 从 selected key 到 split、CTA 和 merge，比较两种实现的 dispatch | [Case](cases/dsv41-small-head-decode/case.json) · [证据](cases/dsv41-small-head-decode/evidence/README.md) |
+| mHC → Mega mHC | 从残差和系数进入框架 dispatch，再看小 T 的融合取舍 | [Case](cases/mhc-mega/case.json) · [证据索引](cases/mhc-mega/evidence/README.md) |
+| kern × vLLM | 用同一轮请求追调度、分组、缓存绑定、stream 交接和回传 | [Case、构建与审查](cases/kern-runtime/README.md) |
+| Model PR history | 看人如何维护档案，Agent 如何从模型问题查到可复核证据 | [Case 与构建](cases/model-pr-history/README.md) |
+| KernelWiki | 切换 B200/H100，沿 FlashAttention-4 候选追到资料和固定实现 | [Case、构建与审查](cases/kernel-wiki/README.md) |
 
 ## 本地运行
 
-需要 Python 3.11+。构建、验证和本地服务使用标准库；打开离线页面不需要 GPU。
+在仓库根目录用 Python 3.11+ 构建，然后打开生成的单文件 HTML。阅读离线页面无需 GPU。
 
-```powershell
-git clone git@github.com:ZhouMaomaoZhou/Kernel_Learning_Agent.git
-cd Kernel_Learning_Agent
-python -m kernel_learning validate
-python -m kernel_learning build
-python -m kernel_learning serve
+| 案例 | 构建命令 | 本地阅读文件 |
+| --- | --- | --- |
+| Small-head sparse decode | `python -m kernel_learning build` | `Kernel_Learning_Studio.html` |
+| mHC | `python -m kernel_learning build-mhc` | `MHC_Learning_Studio.html` |
+| kern × vLLM | `python scripts/build_kern.py` | `Kern_Runtime_Studio.html` |
+| Model PR history | `python scripts/build_pr_history.py` | `Model_PR_History.html` |
+| KernelWiki | `python scripts/build_kernel_wiki.py --output KernelWiki.html` | `KernelWiki.html` |
+
+给对应构建命令加 `--check` 可验证离线文件。用 `python -m kernel_learning serve` 预览网页源码，默认地址为 `http://127.0.0.1:8765`。构建、源码导入与浏览器检查见[仓库架构](docs/architecture.md)和[测试约定](docs/case-testing.md)。
+
+## 仓库结构
+
+```text
+workflows/         阶段、路由和交接
+skills/
+  core/            跨领域的学习方法
+  domains/
+    kernel/        派发、建模、讲解、演进、实验
+    project/       代码库、工具与 skill 拆解
+    runtime/       框架接入、生命周期与交接
+  formats/html/    网页的视觉表达与验收
+cases/             事实、出处和案例审查
+web/               页面源码与共享阅读组件
+kernel_learning/   Kernel 案例的 Python CLI
+scripts/           案例构建、源码导入、场景与截图工具
+tests/             结构、推导和浏览器验证
+docs/              架构、协作约定与历史
 ```
 
-服务地址是 `http://127.0.0.1:8765`。也可直接打开构建得到的根目录 `Kernel_Learning_Studio.html`。更改源码或 Case 后重新运行 `build`；`python -m kernel_learning build --check` 校验本机离线入口是否与源码一致。
+Git 版本化页面与工具源码、教学所需的 Case 和固定来源、测试及维护文档。截图、评审过程、个人笔记、原始 Canvas 和本地源码留在工作副本。离线 HTML 可本地构建，CI 只上传可供阅读的 HTML。
 
-`python -m kernel_learning export-html --output <path>` 可导出单文件页面。默认**不**嵌入 `web/local-sources.json` 中导入的本地源码；`--include-local-sources` 仅供明确审阅后使用。页面 URL 的 `#` 部分记录方案、参数和所选 CTA，刷新及前进/后退可恢复学习位置。
+从一个具体的技术问题开始，附上你已掌握的背景、希望下钻的机制和已知证据。[请求一个学习页面](https://github.com/ZhouMaomaoZhou/Kernel_Learning_Agent/issues/new?template=01-page-request.yml) · [贡献指南](CONTRIBUTING.md) · [路线图](docs/community-roadmap.md)
 
-完整测试需要浏览器依赖：
-
-```powershell
-python -m pip install -r requirements-dev.txt
-python -m playwright install chromium
-python -m unittest discover -s tests -v
-```
-
-本机已安装 Edge 时，可设 `KLA_BROWSER_CHANNEL=msedge` 来运行浏览器测试。CI 运行 Case 合同、Python/浏览器公式一致性、页面交互和构建检查；GPU 数值与性能实验留在明确标记的实验记录中，不能用概念动画替代。测试分层见[case-testing.md](docs/case-testing.md)。
-
-## 一起制作页面
-
-可以从一个**值得回答的工程问题**开始，不要求先写完整 HTML，也不要求有 GPU。请通过[页面请求表单](https://github.com/ZhouMaomaoZhou/Kernel_Learning_Agent/issues/new?template=01-page-request.yml)写明模型/算子、输入场景、想解释的瓶颈、已知源码或 PR 链接，以及希望别人帮忙的部分。维护者和贡献者可在 Issue 中认领来源核查、成本模型、可视化、测试或审稿。
-
-已有材料时，先在 Issue 中定 `case_id` 和版本边界，再开 **Draft PR**。PR 应明确提出需要评审者回答的具体问题，例如“这段 wrapper 在 T=8 时是否进入 fast path？请看固定 SHA 的哪些行”，并给出当前证据等级。不要以一张没有 Case、来源和测试的独立 HTML 作为完成品。具体步骤见[CONTRIBUTING.md](CONTRIBUTING.md)及自动出现的 [PR 模板](.github/pull_request_template.md)。
-
-**当前限制：** `web/`、CLI 和默认测试仍围绕第一个 Case 编写。第二个案例会先作为一次真实的架构验证，随后再抽取多页面构建、目录索引和按 Case 分组的 CI；路线与验收标准见[社区路线图](docs/community-roadmap.md)。
-
-## 仓库文件
-
-| 路径 | 作用 |
-| --- | --- |
-| `cases/<case_id>/` | Case JSON、成本与来源分析、证据和实验记录；研究事实的主要归属地 |
-| `cases/schema.json` | 当前 Case 数据结构；新增策略要同步更新并测试 |
-| `web/` | 现有案例的页面源码、样式、JS 和固定源码摘录 |
-| `kernel_learning/` | 标准库 CLI、Case 验证、派生模型与离线构建 |
-| `tests/` | 通用合同、首个 Case 样例、浏览器交互 |
-| `skills/` | Intake → History → Model → Explain → Investigate 的研究/讲解流程 |
-| `docs/` | 教学规范、研究记录、协作与演进计划 |
-| `references/` | 原始 Obsidian Canvas；保留来源，不静默改写 |
-| `.github/` | CI、页面请求表单与 PR 模板 |
-
-`Kernel_Learning_Studio.html` 是可重建的本地 Obsidian 入口，`web/local-sources.json` 可能含本地源码；两者都不进入 Git。页面发布和统一目录尚未启用。
-
-## 许可证与来源
-
-项目原创代码和文档采用 [Apache-2.0](LICENSE)。固定源码摘录分别来自 [vLLM](https://github.com/vllm-project/vllm/blob/74c0f0e10ac647ee22cf9e2bcd0ee20e40aee343/LICENSE) 与 [SGLang](https://github.com/sgl-project/sglang/blob/b98a4ead5bd337418e8eb5a18e9f5f5a402baac0/LICENSE) 的对应版本；出处见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。引用和测量请保留原始来源、SHA、运行环境及 `reported`/`reproduced` 区别。
+项目原创代码与文档采用 [Apache-2.0](LICENSE)。固定源码摘录及工具借鉴的出处见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -22,23 +22,38 @@ jobs:
       - name: Check source and model
         run: |
           python -m kernel_learning validate
+          python -m kernel_learning validate-mhc
           node --check web/model.js
           node --check web/anatomy.js
           node --check web/app.js
+          node --check web/mhc.js
+          node --check web/reader.js
+          node --check web/mhc-scenes.js
+          node --check web/kern.js
+          python scripts/lesson_scene_tools.py --case cases/mhc-mega/case.json
       - name: Build offline entry points
         run: |
           python -m kernel_learning build
           python -m kernel_learning build --check
+          python -m kernel_learning build-mhc
+          python -m kernel_learning build-mhc --check
+          python scripts/build_kern.py
+          python scripts/build_kern.py --check
+          python scripts/build_pr_history.py
+          python scripts/build_pr_history.py --check
+          python scripts/build_kernel_wiki.py --output KernelWiki.html
+          python scripts/build_kernel_wiki.py --output KernelWiki.html --check
       - name: Run contract and browser interactions
         run: python -m unittest discover -s tests -v
-      - name: Capture review screenshot
-        run: python scripts/capture_studio_preview.py --output dist/studio-overview.png
       - name: Upload offline Studio for review
         uses: actions/upload-artifact@v7
         with:
           name: studio-offline
           path: |
             Kernel_Learning_Studio.html
-            dist/studio-overview.png
+            MHC_Learning_Studio.html
+            Kern_Runtime_Studio.html
+            Model_PR_History.html
+            KernelWiki.html
           if-no-files-found: error
           retention-days: 14

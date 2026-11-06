@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "repository": "BBuf/AI-Infra-Auto-Driven-SKILLS",
+  "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+  "verified_on": "2026-11-03",
+  "sources": [
+    {
+      "id": "skill",
+      "path": "model-pr-optimization-history/SKILL.md",
+      "start": 1,
+      "end": 27,
+      "title": "一个 Skill，一套知识库",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/SKILL.md#L1-L27",
+      "excerpt": "---\nname: model-pr-history-knowledge\ndescription: Use when an SGLang, vLLM, TensorRT-LLM, or TokenSpeed serving/model optimization task needs prior model-family PR evidence. Query and read the PR-driven history docs under model-pr-optimization-history before choosing source paths, fast paths, kernel/fusion ideas, regression risks, or validation lanes.\n---\n\n# Model PR History Knowledge\n\nThis is a PR-driven knowledge base for model optimization history. It is not a\nset of per-model skills. Each model family keeps bilingual docs with inspected\nPR diffs, implementation file coverage, timelines, changed files, code excerpts,\nand validation/risk notes.\n\nUse it before patching model-specific serving paths, choosing an optimization\ntarget, or explaining why a framework already has a faster path.\n\nUse the maintained [source contracts](../docs/upstream-source-contracts.md)\nwhen applying historical evidence to a current branch. The review/history\ncorpora retain their own capture dates; they do not certify today's dispatch\nor numerical defaults. For kernel replacements, verify that the real model\nexecutes the candidate before treating end-to-end tests as coverage.\n\nGenerated entries labeled **not a manual audit** are PR discovery inventories.\nRead their full diffs and current callers before making optimization conclusions;\nAPI file counts and snippets do not establish complete diff coverage. Existing\nmanual audit notes retain their original dates.\n\n## Query",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "workflow",
+      "path": "model-pr-optimization-history/SKILL.md",
+      "start": 47,
+      "end": 74,
+      "title": "Agent 的阅读与记录顺序",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/SKILL.md#L47-L74",
+      "excerpt": "\n## Workflow\n\n1. Infer the model-family slug from the user's model id, checkpoint path, or\n   SGLang source path. If unsure, run `scripts/query.py \"<model name>\"`.\n2. Read the matching SGLang history first for SGLang patch work. Read competitor\n   history too when vLLM, TensorRT-LLM, or TokenSpeed is the leading competitor\n   or its trace suggests a missing SGLang fast path. If the doc opens with a\n   dated note (source-head refresh, backfill audit, or reviewed kernel\n   addendum), read it first: it carries hand-reviewed context that the\n   generated timeline and cards below do not.\n3. Extract only actionable evidence:\n   - model implementation files and symbols\n   - PRs that changed the hot source path\n   - prior fusions, overlap work, quantization, MoE, attention, cache, sampler,\n     or loader changes\n   - open/watch PRs that may explain a known gap or pending support issue\n   - validation lanes and regression risks implied by the PR cards\n4. Save a short note in the active run artifacts, for example\n   `history/model-pr-history-notes.md`, with paths read, PR numbers, source\n   files, and the decision each item influenced.\n5. Do not copy long PR cards into the final answer. Cite paths and summarize the\n   relevant implementation/risk.\n\n## Model Slugs\n\nCurrent frameworks:\n",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "slugs",
+      "path": "model-pr-optimization-history/SKILL.md",
+      "start": 76,
+      "end": 113,
+      "title": "模型族与框架边界",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/SKILL.md#L76-L113",
+      "excerpt": "- `vllm` (44 families)\n- `tensorrt_llm` (15 families)\n- `tokenspeed` (14 families)\n\nCurrent model-family slugs include:\n\n```text\ndeepseek-ocr, deepseek-ocr-2, deepseek-v3-r1, deepseek-v31, deepseek-v32,\ndeepseek-v4, deepseek-v41, dots3, ernie45, exaone4, gemma4, glm-vlm-ocr,\nglm45, glm46-glm47, glm5-glm51, gpt-oss, hunyuan3-preview, hunyuan4, inkling,\nintern-s1, internvl35, jina-reranker-m0, kimi, ling25, ling3, llada21,\nllama31, llama33-70b, llama4, longcat-flash, mimo-v2-flash, minimax,\nmistral-small-4, mixtral-quark-int4fp8-moe, moss-vl, nemotron-super,\nqwen-vlm-omni-asr, qwen3-coder, qwen3-core, qwen3-next, qwen35, qwen36,\nqwen38, qwen4-exp, ring25, step35, step37\n```\n\nAvailability is framework-specific; `python3 scripts/query.py --list` is the\nauthority. Notes on overlapping slugs:\n\n- `deepseek-v4` keeps every V4 PR; `deepseek-v41` is the V4.1 subset of the\n  same files (subject must name V4.1). Read both for DSV4.1 work.\n- `glm5-glm51` covers GLM-5, 5.1, 5.2 and 5.3-Flash (`glm5_next`,\n  `glm53_flash`, `GlmMoeDsa`).\n- `qwen4-exp` is the `qwen4_exp` model file used by Qwen3.8-Flash-Next;\n  `qwen38` tracks the Qwen3.8 cookbook surface. Public `Qwen/Qwen3.8-27B` is\n  `model_type=qwen3_5`, so its loader and kernel history is under `qwen35`\n  (vLLM has no dedicated `qwen38` slug).\n- `hunyuan4` is Hy4 (`hunyuan_v4` / `hy_v4`); `ling3` is BailingMoeV3;\n  `nemotron-super` also covers Nemotron-H; `minimax` covers M2 and M3; `kimi`\n  covers K2, K2.5, K3, Linear and VL.\n- TensorRT-LLM and TokenSpeed dossiers are generated the same way as SGLang and\n  vLLM. Their dated hand-written refresh notes stay at the top of the page.\n\n## Optimization Workflow Contract\n\nWhen a profiling or optimization task uses this knowledge base:\n",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "readme",
+      "path": "model-pr-optimization-history/README.md",
+      "start": 1,
+      "end": 47,
+      "title": "目录职责与人工审阅边界",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/README.md#L1-L47",
+      "excerpt": "# Model PR Optimization History\n\nThis directory stores PR-driven model optimization histories by serving\nframework. These records are documentation, not installable per-model skills:\nthe directory acts as one queryable knowledge base for model-family PR evidence.\n\n- `sglang/`: SGLang model histories and audits.\n- `vllm/`: vLLM model histories and audits.\n- `tensorrt_llm/`: TensorRT-LLM model histories and audits.\n- `tokenspeed/`: TokenSpeed model histories and audits.\n- `SKILL.md`: agent instructions for using this directory as knowledge.\n- `scripts/query.py`: small local search helper for model slugs, doc paths, and\n  keyword snippets.\n- `open-pr-watch.md`: generated watch list for current open PRs that may affect\n  benchmark, profiler, and model-history guidance.\n\nEach model history is bilingual when practical (`README.zh.md` and\n`README.en.md`) and should be grounded in inspected PR diffs, source files, and\nvalidation/risk notes. SGLang, vLLM, TensorRT-LLM, and TokenSpeed entries use\nthe same timeline plus per-PR diff-card format whenever a model family has\nupstream PR evidence.\n\nModel availability is framework-specific rather than a cross-framework\npromise. For example, MOSS-VL is SGLang-only and Inkling has no TensorRT-LLM\nimplementation at the audited heads.\n\nAll four framework trees are rebuilt by\n`tools/rebuild_model_pr_history_from_git.py` from upstream git history. Merged\nPRs that already have an audited card keep that card verbatim; only new or\nstill-open PRs are fetched again. Hand-written dated notes (a source-head\nrefresh, a backfill audit, or a reviewed kernel addendum) sit between the title\nand `Implementation File Coverage` and survive regeneration. Read them first.\n\nOpen PRs are deliberately kept out of the merged-history cards until their\ndiffs are manually reviewed. Regenerate `open-pr-watch.md` before long refresh\nwork and treat it as a triage queue, not as a source of implemented behavior.\n\nGenerated entries labeled **not a manual audit** are PR discovery inventories.\nRead their full diffs and current callers before making optimization conclusions;\nAPI file counts and snippets do not establish complete diff coverage. Existing\nmanual audit notes retain their original dates.\n\nQuick queries:\n\n```bash\npython3 scripts/query.py --list\npython3 scripts/query.py --framework sglang --model qwen3-core --paths-only",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "query",
+      "path": "model-pr-optimization-history/scripts/query.py",
+      "start": 80,
+      "end": 211,
+      "title": "本地查询：文档、计分与匹配行",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/scripts/query.py#L80-L211",
+      "excerpt": "        ]\n    return [path for path in sorted(root.iterdir()) if path.is_dir()]\n\n\ndef _docs(framework: str | None, model: str | None, lang: str) -> list[Doc]:\n    docs: list[Doc] = []\n    for fw in _frameworks(framework):\n        for model_dir in _model_dirs(fw, model):\n            for filename in LANG_TO_FILES[lang]:\n                path = model_dir / filename\n                if path.exists():\n                    docs.append(\n                        Doc(\n                            framework=fw,\n                            model=model_dir.name,\n                            path=path,\n                            text=path.read_text(encoding=\"utf-8\"),\n                        )\n                    )\n    return docs\n\n\ndef _list_models(framework: str | None) -> None:\n    for fw in _frameworks(framework):\n        root = ROOT / fw\n        if not root.exists():\n            continue\n        for model_dir in sorted(path for path in root.iterdir() if path.is_dir()):\n            print(f\"{fw}/{model_dir.name}\")\n\n\ndef _print_paths(docs: list[Doc]) -> None:\n    for doc in docs:\n        print(doc.path.relative_to(ROOT))\n\n\ndef _score(doc: Doc, terms: list[str], preferred_model: str | None = None) -> int:\n    haystack = f\"{doc.framework} {doc.model} {doc.path.name}\\n{doc.text}\".lower()\n    model_slug = doc.model.lower()\n    score = 0\n    if preferred_model and model_slug == preferred_model:\n        score += 100000\n    for term in terms:\n        slug_term = _slugify(term)\n        score += haystack.count(term) * 2\n        if slug_term and slug_term in model_slug:\n            score += 1000\n            if any(char.isdigit() for char in slug_term):\n                score += 5000\n        if term in doc.framework:\n            score += 10\n    return score\n\n\ndef _matching_lines(doc: Doc, terms: list[str], limit: int = 6) -> list[str]:\n    matches: list[str] = []\n    for line_no, line in enumerate(doc.text.splitlines(), 1):\n        lowered = line.lower()\n        if any(term in lowered for term in terms):\n            compact = re.sub(r\"\\s+\", \" \", line).strip()\n            if compact:\n                matches.append(f\"{doc.path.relative_to(ROOT)}:{line_no}: {compact[:220]}\")\n        if len(matches) >= limit:\n            break\n    if matches:\n        return matches\n\n    fallback: list[str] = []\n    for line_no, line in enumerate(doc.text.splitlines(), 1):\n        if line.startswith(\"## \") or line.startswith(\"### PR #\"):\n            fallback.append(f\"{doc.path.relative_to(ROOT)}:{line_no}: {line.strip()[:220]}\")\n        if len(fallback) >= limit:\n            break\n    return fallback\n\n\ndef _search(docs: list[Doc], query: str, limit: int) -> None:\n    terms = _tokenize(query)\n    if not terms:\n        for doc in docs[:limit]:\n            print(doc.path.relative_to(ROOT))\n        return\n\n    preferred_model = _preferred_model_slug(query)\n    scored = [\n        (score, doc)\n        for doc in docs\n        if (score := _score(doc, terms, preferred_model)) > 0\n    ]\n    scored.sort(key=lambda item: (-item[0], str(item[1].path)))\n\n    for score, doc in scored[:limit]:\n        print(f\"## {doc.framework}/{doc.model} ({doc.path.name}) score={score}\")\n        print(f\"Read: {doc.path.relative_to(ROOT)}\")\n        for line in _matching_lines(doc, terms):\n            print(f\"- {line}\")\n        print()\n\n\ndef main() -> int:\n    parser = argparse.ArgumentParser(\n        description=\"Query PR-driven model optimization history docs.\"\n    )\n    parser.add_argument(\"query\", nargs=\"*\", help=\"Search terms, model name, PR, or file path\")\n    parser.add_argument(\"--list\", action=\"store_true\", help=\"List framework/model slugs\")\n    parser.add_argument(\"--framework\", choices=FRAMEWORKS, help=\"Restrict to one framework\")\n    parser.add_argument(\"--model\", help=\"Restrict to one model-family slug\")\n    parser.add_argument(\n        \"--lang\",\n        choices=tuple(LANG_TO_FILES),\n        default=\"en\",\n        help=\"Select English, Chinese, or both docs\",\n    )\n    parser.add_argument(\"--paths-only\", action=\"store_true\", help=\"Only print matching doc paths\")\n    parser.add_argument(\"--limit\", type=int, default=10, help=\"Maximum search results\")\n    args = parser.parse_args()\n\n    if args.list:\n        _list_models(args.framework)\n        return 0\n\n    docs = _docs(args.framework, args.model, args.lang)\n    if args.paths_only:\n        _print_paths(docs)\n        return 0\n\n    query = \" \".join(args.query).strip()\n    if not query and args.model:\n        query = args.model\n    if not query:\n        parser.error(\"provide a query, --model, --paths-only, or --list\")\n",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "filters",
+      "path": "tools/rebuild_model_pr_history_from_git.py",
+      "start": 737,
+      "end": 765,
+      "title": "模型文件过滤",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L737-L765",
+      "excerpt": "def selected_files(framework: str, model: str, all_files: list[str]) -> list[str]:\n    filt = MODEL_FILTERS[framework][model]\n    include = filt[\"include\"]\n    exclude = filt.get(\"exclude\", [])\n    files = [\n        path\n        for path in all_files\n        if matches_any(path, include) and not matches_any(path, exclude) and not is_global_excluded(path)\n    ]\n    # Keep the dossier focused on files that can plausibly affect model support,\n    # validation, launch, or documentation.\n    wanted_roots = (\n        \".github/\",\n        \"benchmark\",\n        \"benchmarks\",\n        \"cpp/\",\n        \"docs\",\n        \"docs_new\",\n        \"examples\",\n        \"python/\",\n        \"scripts/\",\n        \"sglang/\",\n        \"tensorrt_llm/\",\n        \"test\",\n        \"tests\",\n        \"tokenspeed-\",\n        \"vllm/\",\n    )\n    return sorted({path for path in files if path.startswith(wanted_roots) or \"/\" not in path})",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "trace",
+      "path": "tools/rebuild_model_pr_history_from_git.py",
+      "start": 771,
+      "end": 849,
+      "title": "从文件提交追溯 PR，按身份提示过滤",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L771-L849",
+      "excerpt": "def trace_model_prs(framework: str, files: list[str]) -> dict[int, TraceInfo]:\n    if not files:\n        return {}\n    root = FRAMEWORK_ROOTS[framework]\n    selected = set(files)\n    merged: dict[int, TraceInfo] = defaultdict(TraceInfo)\n    chunk_size = 80\n    for start in range(0, len(files), chunk_size):\n        chunk = files[start : start + chunk_size]\n        out = run(\n            [\n                \"git\",\n                \"log\",\n                \"--date=short\",\n                \"--format=\\x02%H\\x01%ad\\x01%s\",\n                \"--name-only\",\n                \"--\",\n                *chunk,\n            ],\n            root,\n        )\n        commit = commit_date = subject = \"\"\n        touched: list[str] = []\n\n        def flush() -> None:\n            if not commit or not subject:\n                return\n            pr_numbers = [int(m.group(1)) for m in PR_RE.finditer(subject)]\n            if not pr_numbers:\n                return\n            traced_files = [path for path in touched if path in selected]\n            if not traced_files:\n                traced_files.extend(chunk)\n            for number in pr_numbers:\n                info = merged[number]\n                info.files.update(traced_files)\n                info.commits.add(commit[:12])\n                info.subjects.add(f\"{commit_date} {subject}\")\n                info.sources.add(\"git log --name-only\")\n\n        for line in out.splitlines():\n            if line.startswith(\"\\x02\"):\n                flush()\n                parts = line[1:].split(\"\\x01\", 2)\n                if len(parts) == 3:\n                    commit, commit_date, subject = parts\n                    touched = []\n                continue\n            path = line.strip()\n            if path:\n                touched.append(path)\n        flush()\n    return dict(sorted(merged.items()))\n\n\ndef normalize_hint_text(text: str) -> str:\n    text = text.lower().replace(\"_\", \"-\")\n    return re.sub(r\"\\s+\", \" \", text)\n\n\ndef filter_traces_by_subject(\n    framework: str, model: str, traces: dict[int, TraceInfo]\n) -> dict[int, TraceInfo]:\n    hints = [normalize_hint_text(hint) for hint in SUBJECT_HINTS.get(model, [])]\n    path_hints = [\n        normalize_hint_text(hint)\n        for hint in PATH_IDENTITY_HINTS.get((framework, model), [])\n    ]\n    if not hints:\n        return traces\n    filtered: dict[int, TraceInfo] = {}\n    for number, trace in traces.items():\n        haystack = normalize_hint_text(\" \".join(trace.subjects))\n        path_haystack = normalize_hint_text(\" \".join(trace.files))\n        if any(hint in haystack for hint in hints) or any(\n            hint in path_haystack for hint in path_hints\n        ):\n            filtered[number] = trace\n    return filtered",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "rebuild",
+      "path": "tools/rebuild_model_pr_history_from_git.py",
+      "start": 1870,
+      "end": 1985,
+      "title": "重建、dry-run 与旧卡片保留",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L1870-L1985",
+      "excerpt": "def rebuild(\n    dry_run: bool = False,\n    frameworks: list[str] | None = None,\n    models: list[str] | None = None,\n    refetch_existing: bool = False,\n) -> None:\n    frameworks = frameworks or list(REPOS)\n    cache = load_cache()\n    all_files = {framework: git_files(framework) for framework in frameworks}\n    update_indexes(dry_run=dry_run, frameworks=frameworks)\n    for framework in frameworks:\n        print(f\"== {framework} ==\")\n        for model in FRAMEWORK_MODEL_ORDER[framework]:\n            if models and model not in models:\n                continue\n            files = selected_files(framework, model, all_files[framework])\n            raw_traces = trace_model_prs(framework, files)\n            traces = filter_traces_by_subject(framework, model, raw_traces)\n            existing = extract_existing_prs(framework, model)\n            existing_cards_zh = extract_existing_cards(framework, model, \"zh\")\n            existing_cards_en = extract_existing_cards(framework, model, \"en\")\n            existing_timeline_rows_zh = extract_existing_timeline_rows(\n                framework, model, \"zh\"\n            )\n            existing_timeline_rows_en = extract_existing_timeline_rows(\n                framework, model, \"en\"\n            )\n            source_tags: dict[int, set[str]] = defaultdict(set)\n            for number in traces:\n                source_tags[number].add(\"git-trace\")\n            for number in existing:\n                source_tags[number].add(\"existing-doc\")\n            numbers = set(traces) | existing\n            existing_only_count = sum(1 for number in existing if number not in traces)\n            reuse = (\n                set()\n                if refetch_existing\n                else reusable_existing_numbers(\n                    numbers,\n                    existing_cards_en,\n                    existing_cards_zh,\n                    existing_timeline_rows_en,\n                    existing_timeline_rows_zh,\n                )\n            )\n            to_fetch = numbers - reuse\n            print(\n                f\"{framework}/{model}: files={len(files)} git_prs={len(traces)} \"\n                f\"raw_git_prs={len(raw_traces)} existing_extra={existing_only_count} \"\n                f\"reuse={len(reuse)} fetching={len(to_fetch)}\",\n                flush=True,\n            )\n            if dry_run:\n                continue\n            fetched = retain_existing_card_fallbacks(\n                framework,\n                fetch_many(framework, to_fetch, traces, source_tags, cache),\n                existing_cards_en,\n                existing_cards_zh,\n            )\n            if not refetch_existing:\n                # A hand-reviewed card for a merged PR (for example one written\n                # in a dated addendum without a timeline row) keeps its text;\n                # the fetch only supplies the missing timeline metadata.\n                for bundle in fetched:\n                    if (\n                        bundle.number in existing_cards_en\n                        and bundle.number in existing_cards_zh\n                        and card_state(existing_cards_en[bundle.number])\n                        in REUSABLE_STATES\n                    ):\n                        bundle.source_tags.add(\"existing-card-keep\")\n            bundles = sorted(\n                fetched\n                + reused_bundles(\n                    framework,\n                    reuse,\n                    traces,\n                    source_tags,\n                    existing_cards_en,\n                    existing_cards_zh,\n                ),\n                key=sort_key,\n            )\n            print(f\"{framework}/{model}: fetched total={len(bundles)}\", flush=True)\n            model_dir = HISTORY_ROOT / framework / model\n            model_dir.mkdir(parents=True, exist_ok=True)\n            (model_dir / \"README.zh.md\").write_text(\n                render_history_zh(\n                    framework,\n                    model,\n                    files,\n                    traces,\n                    bundles,\n                    existing_only_count,\n                    existing_cards_zh,\n                    existing_timeline_rows_zh,\n                    extract_preamble(framework, model, \"zh\"),\n                ),\n                encoding=\"utf-8\",\n            )\n            (model_dir / \"README.en.md\").write_text(\n                render_history_en(\n                    framework,\n                    model,\n                    files,\n                    traces,\n                    bundles,\n                    existing_only_count,\n                    existing_cards_en,\n                    existing_timeline_rows_en,\n                    extract_preamble(framework, model, \"en\"),\n                ),\n                encoding=\"utf-8\",\n            )\n            save_cache(cache)",
+      "evidence_class": "pinned-source"
+    },
+    {
+      "id": "args",
+      "path": "tools/rebuild_model_pr_history_from_git.py",
+      "start": 1989,
+      "end": 2022,
+      "title": "重建命令选项",
+      "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+      "url": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L1989-L2022",
+      "excerpt": "def main() -> None:\n    parser = argparse.ArgumentParser()\n    parser.add_argument(\"--dry-run\", action=\"store_true\")\n    parser.add_argument(\n        \"--framework\",\n        action=\"append\",\n        choices=sorted(REPOS),\n        help=\"Restrict to one framework; repeat for several (default: all).\",\n    )\n    parser.add_argument(\n        \"--model\",\n        action=\"append\",\n        help=\"Restrict to one model slug; repeat for several (default: all).\",\n    )\n    parser.add_argument(\n        \"--refetch-existing\",\n        action=\"store_true\",\n        help=\"Refetch and re-render merged PRs that already have audited cards.\",\n    )\n    args = parser.parse_args()\n    frameworks = args.framework or list(REPOS)\n    missing = [\n        str(FRAMEWORK_ROOTS[framework])\n        for framework in frameworks\n        if not FRAMEWORK_ROOTS[framework].exists()\n    ]\n    if missing:\n        raise SystemExit(f\"missing framework worktrees: {', '.join(missing)}\")\n    rebuild(\n        dry_run=args.dry_run,\n        frameworks=frameworks,\n        models=args.model,\n        refetch_existing=args.refetch_existing,\n    )",
+      "evidence_class": "pinned-source"
+    }
+  ],
+  "query_samples": {
+    "sglang": {
+      "path": "model-pr-optimization-history/sglang/qwen3-core/README.zh.md",
+      "topics": {
+        "fused qk norm": [
+          {
+            "line": 44,
+            "text": "| 2025-07-03 | [#7723](https://github.com/sgl-project/sglang/pull/7723) | merged | [Bug] add flashinfer bool check for fusedmoe in Qwen moe models | `python/sglang/srt/models/qwen2_moe.py`, `python/sglang/srt/models/qwen"
+          },
+          {
+            "line": 45,
+            "text": "| 2025-07-03 | [#7740](https://github.com/sgl-project/sglang/pull/7740) | merged | [optimize] add two stream norm for qwen3 | `python/sglang/srt/models/qwen3.py`, `python/sglang/srt/models/qwen3_moe.py` |"
+          },
+          {
+            "line": 53,
+            "text": "| 2025-07-27 | [#8036](https://github.com/sgl-project/sglang/pull/8036) | merged | [NVIDIA] Add Flashinfer MoE blockscale fp8 backend | `python/sglang/srt/layers/moe/ep_moe/layer.py`, `python/sglang/srt/models/deepseek_v"
+          }
+        ],
+        "moe": [
+          {
+            "line": 9,
+            "text": "| `python/sglang/srt/arg_groups/model_overrides/qwen3_moe.py` | [#39126](https://github.com/sgl-project/sglang/pull/39126) |"
+          },
+          {
+            "line": 11,
+            "text": "| `python/sglang/srt/models/qwen3_moe.py` | [#4693](https://github.com/sgl-project/sglang/pull/4693), [#5917](https://github.com/sgl-project/sglang/pull/5917), [#6120](https://github.com/sgl-project/sglang/pull/6120), [#"
+          },
+          {
+            "line": 12,
+            "text": "| `python/sglang/srt/models/qwen3_moe_mtp.py` | [#26468](https://github.com/sgl-project/sglang/pull/26468) |"
+          }
+        ],
+        "loader": [
+          {
+            "line": 110,
+            "text": "| 2026-05-07 | [#22674](https://github.com/sgl-project/sglang/pull/22674) | closed | [NPU] Support Qwen3.5-MoE and Qwen3-Next quantization | `python/sglang/srt/model_loader/loader.py` |"
+          },
+          {
+            "line": 1013,
+            "text": "- 实现要点: `python/sglang/srt/layers/moe/ep_moe/layer.py` modified +102/-7 (109 lines); hunks: -47,12 +47,17; -64,6 +69,13; symbols: forward, _get_tile_tokens_dim, EPMoE, _weight_loader_physical，涉及 `forward, _get_tile_token"
+          },
+          {
+            "line": 1015,
+            "text": "- `python/sglang/srt/layers/moe/ep_moe/layer.py` modified +102/-7 (109 lines); hunks: -47,12 +47,17; -64,6 +69,13; symbols: forward, _get_tile_tokens_dim, EPMoE, _weight_loader_physical"
+          }
+        ]
+      }
+    },
+    "vllm": {
+      "path": "model-pr-optimization-history/vllm/qwen3-core/README.zh.md",
+      "topics": {
+        "fused qk norm": [
+          {
+            "line": 30,
+            "text": "| 2025-05-07 | [#17735](https://github.com/vllm-project/vllm/pull/17735) | merged | [Kernel] Use fused rmsnorm for some models like qwen3 series | `vllm/model_executor/models/qwen3.py`, `vllm/model_executor/models/qwen3_"
+          },
+          {
+            "line": 49,
+            "text": "| 2026-01-24 | [#32082](https://github.com/vllm-project/vllm/pull/32082) | merged | [Models] Add `SharedFusedMoE` support to Qwen3MoE | `vllm/model_executor/models/qwen3_moe.py` |"
+          },
+          {
+            "line": 55,
+            "text": "| 2026-04-23 | [#40671](https://github.com/vllm-project/vllm/pull/40671) | merged | [MoE Refactor] Rename FusedMoE.make_expert_params_mapping to fused_moe_make_expert_params_mapping | `vllm/model_executor/layers/fused_mo"
+          }
+        ],
+        "moe": [
+          {
+            "line": 12,
+            "text": "| `vllm/model_executor/models/qwen3_moe.py` | [#15289](https://github.com/vllm-project/vllm/pull/15289), [#16203](https://github.com/vllm-project/vllm/pull/16203), [#17735](https://github.com/vllm-project/vllm/pull/17735"
+          },
+          {
+            "line": 28,
+            "text": "| 2025-04-07 | [#15289](https://github.com/vllm-project/vllm/pull/15289) | merged | [Model] Add Qwen3 and Qwen3MoE | `vllm/model_executor/models/qwen3_moe.py`, `vllm/model_executor/models/qwen3.py` |"
+          },
+          {
+            "line": 29,
+            "text": "| 2025-04-08 | [#16203](https://github.com/vllm-project/vllm/pull/16203) | merged | [Model] use AutoWeightsLoader for phimoe,qwen2_moe,qwen3_moe | `vllm/model_executor/models/qwen3_moe.py` |"
+          }
+        ],
+        "loader": [
+          {
+            "line": 29,
+            "text": "| 2025-04-08 | [#16203](https://github.com/vllm-project/vllm/pull/16203) | merged | [Model] use AutoWeightsLoader for phimoe,qwen2_moe,qwen3_moe | `vllm/model_executor/models/qwen3_moe.py` |"
+          },
+          {
+            "line": 39,
+            "text": "| 2025-08-13 | [#22785](https://github.com/vllm-project/vllm/pull/22785) | merged | Fix GGUF loader for Qwen3 MoE. | `vllm/model_executor/models/qwen3_moe.py` |"
+          },
+          {
+            "line": 110,
+            "text": "### PR #16203 - [Model] use AutoWeightsLoader for phimoe,qwen2_moe,qwen3_moe"
+          }
+        ]
+      }
+    }
+  }
+}

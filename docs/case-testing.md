@@ -2,6 +2,10 @@
 
 不采用“一个 Kernel 只有一个 test”，也不为每个 Kernel 复制整套测试文件。每个新 Case 进入同一套门槛：
 
+此页记录自动检查，不替代 [Technical Reviewer](../skills/core/technical-review/SKILL.md) 与 [Visual Reviewer](../skills/formats/html/visual-review/SKILL.md)。后者必须打开浏览器截图检查。
+
+当前 schema/validator 尚有案例差异：sparse-decode 用 `validate`，mHC 用 `validate-mhc`。下表描述验证目的，不要求新算子伪装成首例的 `variants`、heads 或 KV 字段。干净上下文验收还须让审稿人从页面独立复述模型位置、数据依赖、场景瓶颈假设和优化代价；页面加载、截图和测试通过不能替代这一检查。
+
 | 层 | 每个新 Case 要提供什么 | 谁执行 |
 | --- | --- | --- |
 | 结构与出处 | `schema_version`、variants、固定 SHA、source map、evidence 等级 | 通用 schema/validator |
@@ -10,6 +14,8 @@
 | Kernel 数值 | 若有可运行实现，reference 对比、dtype 边界、mask/page stride、随机输入 | 该实现专属；GPU 可用时运行 |
 | 性能实验 | 环境、基线、输入分布、轮数、warmup/Graph/Profiler、置信边界 | 实验记录，不作为无 GPU 的 CI 门槛 |
 
-目前 Case JSON 的 `variants.<id>.dispatch` 是教学 Gate 与 split 策略的参数源；Python `workload()` 和浏览器 `deriveWorkload()` 分别实现公式，使用变更策略的样例做跨语言一致性检查。`tests/test_contract.py` 负责 schema、推导一致性及导出边界；`tests/test_browser.py` 用 Chromium/Edge 实测离线与服务页面；`tests/test_dsv41.py` 保存首个 Case 的语义和数值边界。新增 Kernel 时至少加入它自己的正常、边界和 fallback 样例；若执行图或控件行为不同，补一条浏览器路径。只有真实 Kernel 可运行时才加入数值与 GPU 测试，不用概念图的自我断言冒充正确性测试。
+首例 Case JSON 的 `variants.<id>.dispatch` 是教学 Gate 与 split 策略的参数源；Python `workload()` 和浏览器 `deriveWorkload()` 分别实现公式，使用变更策略的样例做跨语言一致性检查。`tests/test_contract.py` 负责 schema、推导一致性及导出边界；`tests/test_browser.py` 用 Chromium/Edge 实测离线与服务页面；`tests/test_dsv41.py` 保存首个 Case 的语义和数值边界。新增 Kernel 时至少加入它自己的正常、边界和 fallback 样例；若执行图或控件行为不同，补一条浏览器路径。只有真实 Kernel 可运行时才加入数值与 GPU 测试，不用概念图的自我断言冒充正确性测试。
 
 离线 HTML 是从 `web/` 和 Case 构建的派生文件，Git 忽略；本机用 `python -m kernel_learning build` 更新根目录的 Obsidian 入口。`python -m kernel_learning export-html --include-local-sources` 会嵌入本地导入源码，分享前应明确审阅；默认导出不嵌入。
+
+mHC 对应 `tests/test_mhc.py` 与 `tests/test_mhc_browser.py`，由 `validate-mhc` / `build-mhc` 维护其独立合同和导出。Case schema 尚未统一，不能把首例字段要求套在 mHC 上。

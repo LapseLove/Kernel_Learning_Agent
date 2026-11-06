@@ -1,0 +1,1921 @@
+{
+  "schema_version": 1,
+  "case_id": "mhc-mega-sm100",
+  "name": "mHC → Mega mHC · SM100 inference",
+  "snapshot_date": "2026-10-31",
+  "anchor": {
+    "repo": "https://github.com/deepseek-ai/DeepGEMM",
+    "commit": "5081f8513af57e61696de4f4f04b0e707ffb503e",
+    "release_pr": "https://github.com/deepseek-ai/DeepGEMM/pull/432",
+    "phase": "forward inference operator; framework prefill/decode routing is a separate gate",
+    "hardware": "NVIDIA SM100 (API asserts architecture major 10)",
+    "model": "DeepSeek V4 mHC family; T4 Normal is a source-derived shape example, not an enumerated Mega test or production trace",
+    "tp_ep": "not encoded by the Mega mHC API; must be fixed at a framework call site",
+    "default_workload": {
+      "tokens": 4,
+      "hidden": 4096,
+      "hc_mult": 4,
+      "num_sms_assumed": 132,
+      "mode": "normal",
+      "output": "bf16",
+      "deterministic": false
+    },
+    "dtype": "BF16 x/residual/output; FP32 coefficients and Fn; optional FP8 E4M3 output",
+    "strides": "API requires dense contiguous x, residual, coefficients, Fn and output; optional GEMM/shared scale factors use checked noncontiguous layouts"
+  },
+  "math": {
+    "residual": "R'[t,j,h] = x[t,h] · post[t,j] + Σ_i comb[t,i,j] · R[t,i,h]",
+    "coefficient_projection": "flatten(Rℓ+1)·Fn^T → 24 logits; HC RMS scaling; group-specific affine then two independent branches: Pre/Post sigmoid (+Pre epsilon) and 4×4 Comb Sinkhorn",
+    "normal": "Pre from current R' collapses four routes; BF16 rounding precedes RMSNorm and optional FP8 cast",
+    "shifted": "previous Pre collapses current R'; new Pre is stored for the next step; RMSNorm waits for materialized BF16 and split statistics",
+    "source_basis": "tests/test_mega_mhc.py:114-214; code below is a symbolic restatement, not a verbatim snippet"
+  },
+  "operator_graph": {
+    "basis": [
+      "https://arxiv.org/html/2512.24880v2",
+      "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L1-L18",
+      "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/tests/test_mega_mhc.py#L114-L214"
+    ],
+    "placement": "Attention and FFN/MoE each sit inside an mHC boundary. A four-route residual state crosses those sublayers; each sublayer itself accepts and returns one H-wide activation. A V4.1 shifted boundary carries Pre from the previous boundary.",
+    "shapes": {
+      "R": "[T,4,H] BF16",
+      "x": "[T,H] BF16",
+      "old_pre": "[T,4] FP32",
+      "old_post": "[T,4] FP32",
+      "old_comb": "[T,4,4] FP32",
+      "Fn": "[24,4H] FP32",
+      "new_coefficients": "Pre[4], Post[4], Comb[4,4] per token FP32"
+    },
+    "nodes": [
+      {
+        "id": "collapse",
+        "name": "Collapse + RMSNorm",
+        "reads": "Rℓ+1 与 Normal 的新 Preℓ+1 / Shifted 携入的旧 Pre",
+        "computes": "四路加权和 → BF16 舍入 → 输出 RMSNorm",
+        "writes": "下一子层 Fℓ+1 的 [T,H] 输入",
+        "dependency": "Normal 等新 Pre；Shifted 用携入旧 Pre，不依赖本次新 Pre。两个模式都需要 Rℓ+1。"
+      },
+      {
+        "id": "sublayer",
+        "name": "Attention 或 FFN/MoE",
+        "reads": "mHC 输出的 [T,H] 归一化激活",
+        "computes": "下一子层 Fℓ+1：Attention 或 FFN/MoE；不属于本接缝 kernel",
+        "writes": "下一次接缝需要的 xℓ+1",
+        "dependency": "本图从已完成 Fℓ 的 xℓ 开始，到 Fℓ+1 输入结束。"
+      },
+      {
+        "id": "post",
+        "name": "残差更新 Post + Comb",
+        "reads": "xℓ、Rℓ、Postℓ、Combℓ",
+        "computes": "Rℓ+1[t,j,h]=BF16(Postℓ[t,j]·xℓ[t,h]+ΣᵢCombℓ[t,i,j]·Rℓ[t,i,h])",
+        "writes": "Rℓ+1 [T,4,H] BF16",
+        "dependency": "子层 Fℓ 及所需 collective 完成后才能消费 xℓ。"
+      },
+      {
+        "id": "projection",
+        "name": "系数投影 + HC RMS",
+        "reads": "flatten(Rℓ+1) [T,4H]、Fn[24,4H]",
+        "computes": "24 个点积 + 4H 平方和；汇总 split 后用 HC RMS 缩放",
+        "writes": "每 token 24 个归一化 logits",
+        "dependency": "归一化 logits 同时供 Pre/Post 分支与 Comb 分支；两分支无相互数据依赖。"
+      },
+      {
+        "id": "activation",
+        "name": "仿射 + sigmoid",
+        "reads": "前 8 个归一化 logits、Pre/Post 的 scale/base",
+        "computes": "分组仿射；Pre=sigmoid+εpre；Post=post_scale·sigmoid",
+        "writes": "新 Preℓ+1[4]、Postℓ+1[4]",
+        "dependency": "Normal 的新 Pre 供本接缝 Collapse；Shifted 的新 Pre 留待下一接缝。与 Comb 是兄弟分支。"
+      },
+      {
+        "id": "sinkhorn",
+        "name": "Sinkhorn 投影",
+        "reads": "后 16 个归一化 logits、Comb scale/base、ε 与迭代数",
+        "computes": "Comb 仿射 → row softmax+ε → 列归一化 → 交替行/列归一化",
+        "writes": "新 Combℓ+1[4,4]",
+        "dependency": "不读取 sigmoid 的结果；与 Pre/Post 分支共享投影输入，有限迭代得到近似双随机矩阵。"
+      }
+    ],
+    "numerical_example": "单个 hidden 坐标的两路手算：R=[1,2]，x=3，Post=[0.5,0.25]，Comb=[[0.75,0.25],[0.25,0.75]]（行=旧路，列=新路），R′=[2.75,2.5]。此例只解释下标；固定 kernel 实际为四路。",
+    "perspective": "Postℓ→Preℓ+1 seam: xℓ has already returned from sublayer Fℓ; input Rℓ and Postℓ/Combℓ produce Rℓ+1. All coefficient projection nodes below read Rℓ+1; they do not overlap Fℓ in this diagram.",
+    "edges": [
+      {
+        "from": "post",
+        "to": "projection",
+        "value": "Rℓ+1 BF16"
+      },
+      {
+        "from": "projection",
+        "to": "activation",
+        "value": "first 8 normalized logits; affine per group"
+      },
+      {
+        "from": "projection",
+        "to": "sinkhorn",
+        "value": "last 16 normalized logits; Comb affine"
+      },
+      {
+        "from": "post",
+        "to": "collapse",
+        "value": "Rℓ+1 BF16"
+      },
+      {
+        "from": "activation",
+        "to": "collapse",
+        "value": "Preℓ+1",
+        "mode": "normal"
+      },
+      {
+        "from": "carried_pre",
+        "to": "collapse",
+        "value": "Pre carried into this seam",
+        "mode": "shifted"
+      },
+      {
+        "from": "collapse",
+        "to": "sublayer",
+        "value": "normalized H-wide activation for Fℓ+1"
+      }
+    ]
+  },
+  "predecessors": [
+    {
+      "id": "sglang_pre",
+      "name": "SGLang V4：Post 分离，Pre 做 split-K",
+      "commit": "75716163c3589823d768229f5f27d067c3e0e928",
+      "url": "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L625-L795",
+      "graph_nodes": "Post 仍是独立阶段；Pre 路径优化了投影、平方和、split 汇总、激活/Sinkhorn、Collapse 与可选 Norm。",
+      "reads": "Post 读取旧 R、x、Post/Comb 并写 BF16 R′；Pre 重读 R′、FP32 Fn、scale/base 和可选 Norm weight。",
+      "execution": "未开启 DeepGEMM 时，小/中 T 的 TileLang producer 以 [32 token, hidden block] × split-K 计算，写 [split,T,32] 投影与 [split,T] 平方和；big_fuse 再读 partial、汇总并产生系数和输出。开启 opt-in 时，tf32_hc_prenorm_gemm 负责 producer。big_fuse 可再折入 RMSNorm。",
+      "hardware": "TileLang stage 0 每 CTA 128 线程，以 shared BF16 输入/FP32 Fn tile 和 T.gemm 做流水计算；big_fuse 每 token 一 CTA、96 线程。编译后的 warp→MMA 映射未核实。",
+      "tradeoff": "split-K 给低 T 增加 producer CTA，也增加 FP32 scratch；Post 写出 R′ 后仍要被 Pre 重读，producer 与 epilogue 至少两次 launch。此处固定 V4 快照，不等于 V4.1 shifted 调用链。"
+    },
+    {
+      "id": "vllm_fused",
+      "name": "vLLM V4：小 T 的 FMA Post→Pre",
+      "commit": "84168f3c4379aaa6e93528475a0d7abcefbe35af",
+      "url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L418-L533",
+      "dispatch_url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L713",
+      "graph_nodes": "T≤16 时，一次 launch 融合 Post 更新、投影 partial 和平方和 partial；split 汇总、激活/Sinkhorn、Collapse 仍在 mhc_pre_big_fuse。",
+      "reads": "一个 CTA 对应一个 token、hidden split 和输出列 tile，读取旧 Post/Comb、x、旧 R 与对应 Fn 列。不同输出列 CTA 重复计算 R′，只有列 tile 0 写 R′ 和平方和。",
+      "execution": "Grid=(T,24/tile_n,split_K)，每 CTA 256 线程。每线程负责一组 hidden 坐标，计算四路更新与标量 FMA 点积，先 warp 内归约，再由 warp 0 写 FP32 partial。T>16 时 wrapper 改用分离 TileLang Post + DeepGEMM prenorm GEMM。",
+      "hardware": "小 T producer 使用标量 FP32 FMA、warp 与 shared 跨 warp 归约，没有 Tensor Core GEMM。寄存器数、实际 occupancy 和访存量没有测量。",
+      "tradeoff": "减少一次 producer launch，并立即复用本 CTA 算出的 R′；列 tile 之间重复更新、partial scratch 仍在。源码把 R′ 存为 BF16，却用局部 FP32 new_r 参与投影，与重读 BF16 R′ 的数值等价性还需单独验证。"
+    },
+    {
+      "id": "sglang_fused",
+      "name": "SGLang V4：小 T 的 FMA Post→Pre",
+      "commit": "48c47c571038d7d651431d7b649a14e2ecb83e23",
+      "url": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L908-L1145",
+      "dispatch_url": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1315",
+      "graph_nodes": "T≤32 时融合 Post、投影 partial 与平方和 partial；big_fuse 仍汇总 split，计算 Pre/Post/Comb、Collapse 和可选 RMSNorm。更大 T 保留独立 Post；投影 producer 在 opt-in 开启时走 DeepGEMM，否则走 TileLang。",
+      "reads": "一个 CTA 读取旧 Post/Comb、x、旧 R 与对应 Fn 输出列；只有输出列 tile 0 写 BF16 R′ 和平方和 partial。",
+      "execution": "Grid=(T,ceil(24/tile_n),split_K)，每 CTA 256 线程；每线程处理 hidden 坐标，算四路 FMA 更新、局部投影和 RMS partial，再做 warp 归约与 FP32 split scratch 写入。",
+      "hardware": "小 T 使用标量 FMA 与 warp/shared 归约；更大 T 且 opt-in 开启时可选 DeepGEMM Tensor Core 投影。编译布局与 profiler 计数未知。",
+      "tradeoff": "源码明确在投影前把新 R′ 舍入为 BF16，保留未融合 Post→Pre 的数值边界。输出列 CTA 仍重复更新计算；big_fuse 是下一次 launch。"
+    }
+  ],
+  "fusion_atlas": {
+    "question": "同一条 Post→下一 Pre 接缝，在各实现中究竟分成几次 kernel launch？",
+    "data_basis": "conceptual; launch 分组和数据边界来自固定源码，不是 GPU 时间轴",
+    "what_to_read": "横向是算子类别，不是依赖或耗时；实色分组只表示同一次 launch 覆盖。先读 Normal/Shifted 分支图，再点实现查看执行细节。",
+    "conclusion": "早期融合主要消掉 Post→投影之间的一次 launch；Mega 把汇总、Sinkhorn 和输出 Norm 也纳入一次 launch，但内部仍有 scratch 与同步。",
+    "stages": [
+      "Post/Comb 写 R′",
+      "4H→24 投影 + 平方和",
+      "split 汇总 + HC RMS",
+      "Pre/Post ∥ Comb 分支",
+      "Pre Collapse",
+      "输出 RMSNorm"
+    ],
+    "rows": [
+      {
+        "id": "sglang_pre",
+        "label": "SGLang V4 · 分离 Pre",
+        "scope": "Post 独立；小/中 T 的 split-K Pre",
+        "segments": [
+          {
+            "span": 1,
+            "kind": "post",
+            "label": "Post kernel"
+          },
+          {
+            "span": 1,
+            "kind": "producer",
+            "label": "Pre producer"
+          },
+          {
+            "span": 3,
+            "kind": "epilogue",
+            "label": "big_fuse"
+          },
+          {
+            "span": 1,
+            "kind": "optional",
+            "label": "可选并入"
+          }
+        ],
+        "boundaries": "R′ BF16 写回并重读 → FP32 split partial → big_fuse；Norm 视 weight/变种而定。",
+        "source": "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L625-L795"
+      },
+      {
+        "id": "vllm_fused",
+        "label": "vLLM V4 · 小 T 融合",
+        "scope": "T≤16；标量 FMA producer",
+        "segments": [
+          {
+            "span": 2,
+            "kind": "fma",
+            "label": "FMA：Post + 投影"
+          },
+          {
+            "span": 3,
+            "kind": "epilogue",
+            "label": "big_fuse"
+          },
+          {
+            "span": 1,
+            "kind": "outside",
+            "label": "边界外"
+          }
+        ],
+        "boundaries": "状态 R′ 写 BF16，但投影使用局部 FP32 new_r（不同于 SGLang 的投影前 BF16 舍入）；FP32 partial → 第二次 big_fuse launch；Norm 不在此 wrapper。",
+        "source": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L713"
+      },
+      {
+        "id": "sglang_fused",
+        "label": "SGLang V4 · 小 T 融合",
+        "scope": "T≤32；标量 FMA producer",
+        "segments": [
+          {
+            "span": 2,
+            "kind": "fma",
+            "label": "FMA：Post + 投影"
+          },
+          {
+            "span": 3,
+            "kind": "epilogue",
+            "label": "big_fuse"
+          },
+          {
+            "span": 1,
+            "kind": "optional",
+            "label": "可选并入"
+          }
+        ],
+        "boundaries": "R′ 在投影前 BF16 舍入；FP32 split partial → 第二次 big_fuse launch；Norm 可被 big_fuse 包含。",
+        "source": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1350"
+      },
+      {
+        "id": "mega",
+        "label": "DeepGEMM · Mega mHC",
+        "scope": "SM100 专用；Normal/Shifted 分支",
+        "segments": [
+          {
+            "span": 6,
+            "kind": "mega",
+            "label": "一个 launch 容器（不表示串行）· Normal / Shifted 依赖见上图"
+          }
+        ],
+        "boundaries": "R′ 仍是输出状态；FP32 split partial 经 scratch 和跨 CTA barrier；Shifted 的输出读取旧 Pre，新 Pre 留给下一边界。",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L69-L112"
+      }
+    ]
+  },
+  "operator_implementation": [
+    {
+      "operator": "Post + Comb → R′",
+      "early": "SGLang V4 的独立 mhc_post_tilelang 写 BF16 R′；vLLM/SGLang 小 T 融合 CTA 直接读取 x、旧 R 与旧系数，并把更新和投影 partial 合算。",
+      "mega": "WG1–2 更新 R′，同时 WG0 准备系数 GEMM；R′ 还必须作为跨边界状态写出。",
+      "evidence": [
+        "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L828-L905",
+        "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L476-L504",
+        "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L403-L529"
+      ]
+    },
+    {
+      "operator": "4H→24 投影 + HC RMS",
+      "early": "SGLang 独立 Pre 使用 split-K 的 T.gemm 或 DeepGEMM；小 T 融合使用 256 线程标量 FMA CTA、warp/shared 归约，写 FP32 partial。不同输出列可能重复算 R′。",
+      "mega": "WG0 用 TMA 载入 Fn，以 TF32 UMMA 累加各 split partial；WG3 写 scratch；Mix 等全部 split。",
+      "evidence": [
+        "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L337-L400",
+        "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1064-L1145",
+        "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L185-L280"
+      ]
+    },
+    {
+      "operator": "Affine/sigmoid + 4×4 Sinkhorn",
+      "early": "big_fuse CTA 读取 FP32 split partial，计算 HC RMS 和 24 个系数；其前 32 线程在小矩阵上处理 Post/Comb 与 Sinkhorn。",
+      "mega": "Mix worker 在同一次 persistent launch 中汇总 split partial、得到 Pre/Post 并执行 Sinkhorn。",
+      "evidence": [
+        "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L81-L149",
+        "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L169-L220",
+        "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh#L15-L100"
+      ]
+    },
+    {
+      "operator": "Pre Collapse + 输出 RMSNorm",
+      "early": "big_fuse 的其他线程读取 R′ 和 Pre，把四路压成一路；SGLang 可选 with_norm 变种继续算输出 RMSNorm。V4 当前 Pre 与 V4.1 carried Pre 是不同契约。",
+      "mega": "Normal 等本次 Mix 的 Pre；Shifted 使用携带来的旧 Pre，WG5 等 BF16 X1 和统计量到齐再做 Norm。",
+      "evidence": [
+        "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L150-L177",
+        "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L460-L486",
+        "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L656-L699"
+      ]
+    }
+  ],
+  "geometry": {
+    "block_m": 64,
+    "block_k": 64,
+    "outputs": 24,
+    "routes": 4,
+    "warpgroups_per_cta": 6,
+    "warps_per_warpgroup": 4,
+    "roles": [
+      "WG0: TMA input/Fn + TF32 UMMA producer",
+      "WG1: residual update / Post worker A",
+      "WG2: residual update / Post worker B",
+      "WG3: split partials and barrier arrival",
+      "WG4: shifted Mix or normal worker",
+      "WG5: Norm worker; normal mode can reuse retired WGs"
+    ],
+    "schedule": "persistent grid of num_sms CTAs; task=(64-token block, hidden-K split); CTA takes task_idx=blockIdx.x + n·num_sms",
+    "mapping_note": "Source names the six warpgroup roles and selected lane formulas. This conceptual map is not an interpreter trace or profiler timeline."
+  },
+  "source_map": [
+    {
+      "id": "api",
+      "title": "Gate and tensor contract",
+      "file": "csrc/apis/mega_mhc.hpp",
+      "start": 89,
+      "end": 251,
+      "question": "Which call shapes can reach Mega mHC?",
+      "data_basis": "source-derived",
+      "what_to_read": "SM100, route count, contiguous BF16/FP32 tensors and output checks",
+      "conclusion": "This API is specialized; a framework must route other devices and formats elsewhere."
+    },
+    {
+      "id": "split",
+      "title": "Split policy and scratch",
+      "file": "csrc/apis/mega_mhc.hpp",
+      "start": 15,
+      "end": 42,
+      "question": "How many hidden-K partitions are created?",
+      "data_basis": "source-derived",
+      "what_to_read": "deterministic 16-way mode, SM-aware maximum, per-stream barrier initialization",
+      "conclusion": "Split count trades parallel producer work for FP32 partials and reduction."
+    },
+    {
+      "id": "layout",
+      "title": "Tile and workspace",
+      "file": "deep_gemm/include/deep_gemm/layout/mega_mhc.cuh",
+      "start": 11,
+      "end": 112,
+      "question": "What does one task contain?",
+      "data_basis": "source-derived",
+      "what_to_read": "64 token rows, 64 hidden positions per route, 24 coefficient outputs and three FP32 partial arrays",
+      "conclusion": "A task is one token block × one hidden-K split, with one or more 64-hidden iterations."
+    },
+    {
+      "id": "launch",
+      "title": "Persistent launch",
+      "file": "csrc/jit_kernels/impls/sm100_mega_mhc.hpp",
+      "start": 105,
+      "end": 149,
+      "question": "How does the host launch work?",
+      "data_basis": "source-derived",
+      "what_to_read": "JIT specialization, num_sms grid and 768-thread CTA",
+      "conclusion": "One launch contains persistent CTAs; launch geometry alone does not give occupancy or latency."
+    },
+    {
+      "id": "assign",
+      "title": "CTA and warpgroup assignment",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 69,
+      "end": 112,
+      "question": "Which split does CTA 0 first own?",
+      "data_basis": "source-derived",
+      "what_to_read": "uneven whole-block split formula and six static WG roles",
+      "conclusion": "For the anchor, task 0 is token block 0, split 0 and hidden 0–63 on each route."
+    },
+    {
+      "id": "load",
+      "title": "Separate TMA inputs",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 185,
+      "end": 238,
+      "question": "What enters the producer pipeline?",
+      "data_basis": "source-derived",
+      "what_to_read": "warp 0 reads residual and x, warp 1 reads Fn, warp 2 is the MMA worker",
+      "conclusion": "The two TMA input branches feed the same coefficient GEMM."
+    },
+    {
+      "id": "coeff",
+      "title": "Old coefficient TMA",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 287,
+      "end": 315,
+      "question": "When are prior Post/Comb/Pre coefficients loaded?",
+      "data_basis": "source-derived",
+      "what_to_read": "warp 3 stages Post and Comb for each task; shifted mode also stages carried Pre",
+      "conclusion": "The coefficient reads are a separate input branch and repeat for each K split of a token block."
+    },
+    {
+      "id": "post",
+      "title": "Residual update and UMMA",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 403,
+      "end": 529,
+      "question": "Where is the updated residual made?",
+      "data_basis": "source-derived",
+      "what_to_read": "WG1–2 use post/comb coefficients, compute route updates and feed A to TMEM",
+      "conclusion": "Residual mixing and the coefficient GEMM are pipelined within a CTA."
+    },
+    {
+      "id": "mma",
+      "title": "Coefficient GEMM",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 244,
+      "end": 280,
+      "question": "Why a Tensor Core GEMM for only 24 outputs?",
+      "data_basis": "source-derived",
+      "what_to_read": "TF32 UMMA accumulator across K atoms and four routes",
+      "conclusion": "Split-K exposes parallelism for a wide reduction, while 24 outputs stay a small N dimension."
+    },
+    {
+      "id": "partials",
+      "title": "Partial write and split arrival",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 570,
+      "end": 654,
+      "question": "When can Mix read a token block?",
+      "data_basis": "source-derived",
+      "what_to_read": "WG3 drains TMEM to FP32 scratch and signals Mix only after statistics and stores",
+      "conclusion": "Mix waits for all splits; the reduction is inside the same kernel, not a second launch."
+    },
+    {
+      "id": "mix",
+      "title": "Split reduction and Sinkhorn",
+      "file": "deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh",
+      "start": 15,
+      "end": 100,
+      "question": "How are Pre/Post/Comb produced?",
+      "data_basis": "source-derived",
+      "what_to_read": "reduce 24 partial outputs, normalize by HC RMS, sigmoid Pre/Post and iterate 4×4 Sinkhorn",
+      "conclusion": "This stage turns the partial GEMM into next-step routing coefficients."
+    },
+    {
+      "id": "norm",
+      "title": "Normal and shifted output paths",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 656,
+      "end": 699,
+      "question": "Which Pre coefficient normalizes the output?",
+      "data_basis": "source-derived",
+      "what_to_read": "normal mode reuses retired WGs; shifted mode uses previous Pre and a separate Norm barrier",
+      "conclusion": "The two modes have different state lifetimes and cannot be collapsed into one naive formula."
+    },
+    {
+      "id": "norm_math",
+      "title": "Shifted Norm computation",
+      "file": "deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh",
+      "start": 292,
+      "end": 370,
+      "question": "What does shifted Norm wait for and calculate?",
+      "data_basis": "source-derived",
+      "what_to_read": "Norm barrier waits for BF16 X1 stores and split squared sums before RMS scaling and optional FP8",
+      "conclusion": "The output uses carried Pre and a BF16 boundary before RMSNorm; current new Pre belongs to a later step."
+    },
+    {
+      "id": "barrier",
+      "title": "Graph replay and split barriers",
+      "file": "deep_gemm/include/deep_gemm/scheduler/mega_mhc.cuh",
+      "start": 7,
+      "end": 86,
+      "question": "Why does replay need an epoch?",
+      "data_basis": "source-derived",
+      "what_to_read": "epoch tag prevents a CUDA Graph replay from accepting prior split completions",
+      "conclusion": "Correctness depends on ordering across persistent CTAs, not just local warp synchronization."
+    },
+    {
+      "id": "reference",
+      "title": "PyTorch reference formula",
+      "file": "tests/test_mega_mhc.py",
+      "start": 114,
+      "end": 214,
+      "question": "What mathematical output does the kernel approximate?",
+      "data_basis": "source test design",
+      "what_to_read": "new residual, coefficient GEMM, Sinkhorn, shifted versus normal Pre, and RMSNorm",
+      "conclusion": "The reference defines the numerical boundaries used by the correctness test."
+    },
+    {
+      "id": "test",
+      "title": "Reference and test coverage",
+      "file": "tests/test_mega_mhc.py",
+      "start": 243,
+      "end": 359,
+      "question": "What is tested, and what is still unmeasured here?",
+      "data_basis": "source test design; not locally reproduced",
+      "what_to_read": "correctness, deterministic repeat, graph capture/replay, two streams, shape matrix and kineto call",
+      "conclusion": "The repository contains GPU tests; this case has no local SM100 results or comparable benchmark run."
+    },
+    {
+      "id": "roles",
+      "title": "Six workgroups, changing consumer roles",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 185,
+      "end": 210,
+      "question": "Which workers persist, and which roles change?",
+      "data_basis": "CTA has six 128-thread workgroups; role retirement and consumer entry are separate.",
+      "what_to_read": "Read role dispatch together with Normal/Shifted branches at L656–690.",
+      "conclusion": "WG0 controls transfers and MMA; WG1/2 Post; WG3 drains partials. Consumer roles differ by mode."
+    },
+    {
+      "id": "post_map",
+      "title": "Post lane coordinates and interleaved atoms",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 403,
+      "end": 477,
+      "question": "Which rows and hidden pairs does a Post lane own?",
+      "data_basis": "BLOCK_M=64; four warps/WG; four lanes per row group; two rows/lane.",
+      "what_to_read": "Trace row_indices, hidden_pair_idx and advance(kNumPostWGs).",
+      "conclusion": "WG1/2 alternate 8-hidden atoms; a lane processes two rows and a pair of hidden values."
+    },
+    {
+      "id": "post_publish",
+      "title": "BF16 boundary, TMEM publish and statistics",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 496,
+      "end": 562,
+      "question": "Which representations of the updated residual are published?",
+      "data_basis": "Post rounds to BF16 before projection, square sums and optional Shifted Collapse.",
+      "what_to_read": "Follow stores, full_a, store_ready_io and full_stats; they protect different values.",
+      "conclusion": "TMEM A, residual store and statistics have distinct consumers and readiness signals."
+    },
+    {
+      "id": "io_store",
+      "title": "Residual store completion and independent Norm arrival",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 318,
+      "end": 383,
+      "question": "When can the IO slot be reused, and when is X1 visible?",
+      "data_basis": "TMA-store wait precedes empty_io; Shifted stats precede Norm arrival.",
+      "what_to_read": "Trace store_ready_io → tma_store_wait → empty_io, then mode-specific arrival.",
+      "conclusion": "Store completion gates slot reuse; Shifted Norm arrival also includes X1 statistics."
+    },
+    {
+      "id": "mma_ring",
+      "title": "MMA waits, reuse and accumulator commit",
+      "file": "deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh",
+      "start": 244,
+      "end": 285,
+      "question": "How do two operands and reusable slots constrain MMA?",
+      "data_basis": "Fn ring per K block; A ring per 8-hidden atom; accumulator per split task.",
+      "what_to_read": "Follow full_fn/full_a and release of empty_a/empty_fn; full_accum comes after the task.",
+      "conclusion": "One 64-hidden block contains eight atoms and four route products per atom."
+    },
+    {
+      "id": "normal_worker",
+      "title": "Normal consumer: one WG owns one token",
+      "file": "deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh",
+      "start": 138,
+      "end": 220,
+      "question": "Who runs Mix, Collapse and Norm in Normal mode?",
+      "data_basis": "A shared ticket selects token; warp0 runs Mix; all four warps consume its Pre.",
+      "what_to_read": "Follow token_idx, pre_coeffs, named barrier, retained BF16 X1 and the four-warp RMS reduction.",
+      "conclusion": "Normal joins all split writes, rereads R′, and retains Collapse in registers; no global X1 is required."
+    },
+    {
+      "id": "split_barrier",
+      "title": "Split barrier: release, acquire and replay epoch",
+      "file": "deep_gemm/include/deep_gemm/scheduler/mega_mhc.cuh",
+      "start": 42,
+      "end": 84,
+      "question": "What replaces a kernel boundary between producer and consumer?",
+      "data_basis": "Each split arrives once; consumer waits for S arrivals under the current epoch.",
+      "what_to_read": "Read init/wait_init, release arrival and acquire wait; distinguish Mix and Norm domains.",
+      "conclusion": "Partial visibility is explicit; a single launch is not automatic cross-CTA synchronization."
+    }
+  ],
+  "lineage": [
+    {
+      "label": "A · 模型算法：为何需要 mHC",
+      "events": [
+        {
+          "date": "2024 → 2025",
+          "title": "HC 把单条 residual 扩展成多条流",
+          "fact": "Hyper-Connections 引入更宽的残差流与可学习连接，以扩大跨层信息路径。",
+          "decision": "换取表达能力与更丰富的层间连接。",
+          "boundary": "未约束的残差混合矩阵在深层复合时可能放大或衰减信号；这是模型问题，不是某个 CUDA kernel 的缺陷。",
+          "sources": [
+            {
+              "label": "HC 原论文",
+              "url": "https://arxiv.org/abs/2409.19606v2"
+            },
+            {
+              "label": "DeepSeek mHC 论文",
+              "url": "https://arxiv.org/html/2512.24880v2"
+            }
+          ]
+        },
+        {
+          "date": "2025-12 → 2026",
+          "title": "mHC 让残差混合接近双随机矩阵",
+          "fact": "DeepSeek 用 Sinkhorn 迭代约束 4×4 residual mix，保留多流表达并稳定信号传播；V4 模型卡列出 mHC。",
+          "decision": "付出小矩阵投影与额外状态处理，换取可扩展的残差路径。",
+          "boundary": "论文中的 TileLang 融合、重计算和 DualPipe overlap 属于训练设施；其训练额外耗时不等于推理 Mega mHC 的延迟。",
+          "sources": [
+            {
+              "label": "mHC 论文 v2",
+              "url": "https://arxiv.org/html/2512.24880v2"
+            },
+            {
+              "label": "DeepSeek V4 模型卡",
+              "url": "https://fe-static.deepseek.com/chat/transparency/deepseek-V4-model-card-EN.pdf"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "B · 算子实现：从分离到融合",
+      "events": [
+        {
+          "date": "2026-05",
+          "title": "早期 pre/post 分离与 split-K 预归一化",
+          "fact": "SGLang V4 路线先接入 DeepGEMM tf32_hc_prenorm_gemm，再将 split-K reduction 折入 big_fuse，并尝试把 RMSNorm 折入 pre。",
+          "decision": "先针对窄 token、宽 hidden 的投影与 launch 数做局部融合，保留原有 pre/post 分工。",
+          "boundary": "#24438 先合入 deepseek_v4_dev；该 V4 独立算子 microbenchmark 与 V4.1 shifted Mega mHC 并非同一边界。",
+          "sources": [
+            {
+              "label": "SGLang #24438",
+              "url": "https://github.com/sgl-project/sglang/pull/24438"
+            },
+            {
+              "label": "SGLang #24775",
+              "url": "https://github.com/sgl-project/sglang/pull/24775"
+            },
+            {
+              "label": "固定 pre 源码",
+              "url": "https://github.com/sgl-project/sglang/blob/75716163c3589823d768229f5f27d067c3e0e928/python/sglang/srt/layers/mhc.py#L625-L795"
+            }
+          ]
+        },
+        {
+          "date": "2026-05",
+          "title": "跨 post→pre 接缝融合",
+          "fact": "vLLM #41536 以 FMA 低并发路径融合 hc_post 与 hc_pre prenorm；SGLang #25976 增加 mhc_fused_post_pre。",
+          "decision": "消除两阶段间的部分中间张量和 launch，优先覆盖小 batch 的边界。",
+          "boundary": "这些是 Mega mHC 的前驱方案，不是同一 kernel；具体数值顺序与 V4.1 carried Pre 必须分别核验。",
+          "sources": [
+            {
+              "label": "vLLM #41536",
+              "url": "https://github.com/vllm-project/vllm/pull/41536"
+            },
+            {
+              "label": "固定 vLLM 融合源码",
+              "url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L555-L723"
+            },
+            {
+              "label": "SGLang #25976",
+              "url": "https://github.com/sgl-project/sglang/pull/25976"
+            },
+            {
+              "label": "固定 SGLang 融合源码",
+              "url": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L908-L1258"
+            }
+          ]
+        },
+        {
+          "date": "2026-09",
+          "title": "DeepGEMM 发布 Mega mHC",
+          "fact": "#432 发布 SM100 融合 kernel：残差更新、系数 GEMM、Sinkhorn、Norm 与可选 FP8 输出；发布说明报告 45–85% kernel speedup。",
+          "decision": "用单次 persistent launch、Split-K partial 与跨 CTA Mix/Norm 同步覆盖完整 mHC 边界。",
+          "boundary": "45–85% 是作者 reported，发布说明未完整给出其基线、trial 与 workload；这里没有复现。当前 Anatomy 固定在后续 5081f851 快照，不能与 #432 PR-head 当作同一源码。",
+          "sources": [
+            {
+              "label": "DeepGEMM #432",
+              "url": "https://github.com/deepseek-ai/DeepGEMM/pull/432"
+            },
+            {
+              "label": "发布时 API",
+              "url": "https://github.com/deepseek-ai/DeepGEMM/blob/39d8c4cacc2c07c1fa9921c6c29c6a8a2da75359/csrc/apis/mega_mhc.hpp#L89-L251"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "C · 框架接入与 overlap：同名目标，不同调度",
+      "events": [
+        {
+          "date": "2026-09",
+          "title": "vLLM V4.1 选择 Mega 或 TileLang fallback",
+          "fact": "#56962 的 wrapper 对 DeepGEMM 可用性、SM100、H%1024、hc=4、carried Pre、Norm、T≤2²⁰ 与 auxiliary capture 做 gate。",
+          "decision": "在符合数值与布局契约时走 Mega；其他形状继续成熟的 TileLang fused path。",
+          "boundary": "PR 报告 GB200 上 stage CUDA Graph CUPTI 与 TP4 serving 两类结果；它们不是同一分母，也不能转写为当前本机测量。",
+          "sources": [
+            {
+              "label": "vLLM #56962",
+              "url": "https://github.com/vllm-project/vllm/pull/56962"
+            },
+            {
+              "label": "固定 gate",
+              "url": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py#L112-L156"
+            },
+            {
+              "label": "固定 caller",
+              "url": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/model.py#L336-L452"
+            }
+          ]
+        },
+        {
+          "date": "2026-10",
+          "title": "SGLang V4.1 把 Mega 作为 opt-in 路径",
+          "fact": "#42808 的条件包含环境变量、SM100、非 HIP、无 CP prefill 与 open seam；某些 collective 路径优先于 Mega。",
+          "decision": "以较窄的资格门槛接入新 kernel，同时保留现有 fused all-reduce / mHC fallback。",
+          "boundary": "PR 中 accuracy/speed 栏未给可复核结果；dsv4 路径名不决定模型版本或前向阶段。",
+          "sources": [
+            {
+              "label": "SGLang #42808",
+              "url": "https://github.com/sgl-project/sglang/pull/42808"
+            },
+            {
+              "label": "固定 gate",
+              "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L572-L579"
+            },
+            {
+              "label": "固定 collective 分支",
+              "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L641-L676"
+            }
+          ]
+        },
+        {
+          "date": "2026-09 → 10",
+          "title": "侧流系数 overlap 是另一条优化轴",
+          "fact": "vLLM #57603 在小 captured token shape 选择系数 overlap；SGLang 的可选 side stream 先算系数再通过 event join。",
+          "decision": "利用 attention/FFN 与系数计算之间可并行的时间窗，而不是继续扩大 Mega kernel 本身。",
+          "boundary": "CUDA stream 的创建/等待仅证明意图与顺序；需要 GPU trace 证明实际并行。它也不同于四条 residual streams 和论文训练 DualPipe。",
+          "sources": [
+            {
+              "label": "vLLM #57603",
+              "url": "https://github.com/vllm-project/vllm/pull/57603"
+            },
+            {
+              "label": "SGLang side stream",
+              "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L222-L247"
+            },
+            {
+              "label": "SGLang join",
+              "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L559-L568"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "dispatch_backtests": [
+    {
+      "framework": "vLLM #56962",
+      "snapshot": "91368b7e2330d9b36e86c6ca54c7a938efcca29b",
+      "positive": "SM100, DeepGEMM mega_mhc available, H=5120, hc=4, T=8, carried Pre and norm present, no auxiliary capture → Mega candidate",
+      "negative": "SM90, H=5000, hc=2, missing carried Pre, auxiliary capture, or unsupported DeepGEMM → TileLang fused fallback",
+      "source": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py#L19-L156",
+      "status": "source-derived backtest; not runtime executed"
+    },
+    {
+      "framework": "SGLang #42808",
+      "snapshot": "0ac7ee38c478632aee85c6537106abc37c52bdd5",
+      "positive": "opt-in enabled, SM100, non-HIP, no CP prefill, open seam → Mega candidate if the caller does not take the collective branch",
+      "negative": "opt-in off, HIP, non-SM100, CP prefill, closed seam, or collective branch precedence → existing route",
+      "source": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L572-L676",
+      "status": "source-derived backtest; not runtime executed"
+    }
+  ],
+  "dispatch_guide": [
+    {
+      "scope": "模型语义",
+      "condition": "V4 普通 Pre/Post；V4.1 hc_pre_from_prev_sublayer / shifted Pre",
+      "result": "前者可在当前 Pre 后 collapse；后者必须携带旧 Pre 到下一边界，因此不把两条调用路径视为可互换。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L1-L18",
+      "status": "source-derived"
+    },
+    {
+      "scope": "V4 小/大 T 融合",
+      "condition": "vLLM #41536 T≤16；SGLang #25976 T≤32；超过各自门槛",
+      "result": "小 T 走标量 FMA Post+投影 partial，再跑 big_fuse；大 T 分离 Post 与投影 GEMM，并保留 big_fuse。SGLang 大 T 的 DeepGEMM 需其 opt-in，否则 TileLang。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1315",
+      "status": "source-derived; vLLM separate link in predecessor"
+    },
+    {
+      "scope": "vLLM V4.1 首层/Engram",
+      "condition": "首层无既有 residual；或 Engram 在 Post 与下一 Pre 之间改写残差",
+      "result": "首层先广播 embedding 并跑 delayed Pre；Engram 路径分开 Post、注入、Pre。其余普通边界才调用 shifted wrapper。",
+      "evidence": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/model.py#L336-L452",
+      "status": "source-derived"
+    },
+    {
+      "scope": "vLLM V4.1 设备/形状",
+      "condition": "普通 shifted 边界且旧 Pre、Norm 存在；非 auxiliary capture；DeepGEMM 可用；SM100；hc=4；H%1024=0；T≤2²⁰",
+      "result": "Mega；任一条件失败交给 delayed TileLang fused fallback。该 wrapper 没有显式 prefill/decode 门槛，实际 T 与调用形状决定可否进入。",
+      "evidence": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py#L19-L156",
+      "status": "source-derived"
+    },
+    {
+      "scope": "SGLang V4.1 Mega 候选",
+      "condition": "opt-in 打开；SM100、非 HIP、无 CP prefill、seam open；下一边界 norm_fusable 且有 hc",
+      "result": "Post→下一 Pre/Norm 可取 Mega；函数名含 prefill，但 gate 本身没有 forward_mode 判定，不能声称仅 prefill。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L572-L612",
+      "status": "source-derived"
+    },
+    {
+      "scope": "SGLang 并行优先级",
+      "condition": "attention 返回 AttnOutput collective；或 MoE 可 deferred finalize / all-reduce",
+      "result": "优先走通信融合路径；其他情况才尝试 Mega 或普通 Post。attention/FFN 的 TP4 等静态门槛和动态 token 容量由上层决定，EP/DP 影响其返回形式与可用路径。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L641-L760",
+      "status": "source-derived"
+    },
+    {
+      "scope": "SGLang phase 与 overlap",
+      "condition": "shifted V4.1；decode 或有 token 的 target verify；SM90 token 条件；多 stream opt-in",
+      "result": "可启用 stats side stream，与主流上的 collapse/子层形成可并行的依赖结构，并在 Post 前 join；实际并发仍需 trace。Prefill 可走其他形状/collective/CP 路径。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L222-L247",
+      "status": "source-derived; overlap unmeasured"
+    },
+    {
+      "scope": "SGLang CP / PP / 尾部",
+      "condition": "CP extend，PP>1，late-layer row selection 等",
+      "result": "CP prefill 排除 Mega；V4.1 pre-from-prev 层循环当前断言 PP=1；尾部行选择前关闭 Mega seam。不能从 TP/EP 数字单独推出 Mega 使用。",
+      "evidence": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4.py#L4026-L4134",
+      "status": "source-derived"
+    }
+  ],
+  "dispatch_examples": [
+    {
+      "input": "V4，vLLM #41536，T=8，HC=4，BF16/FP32 契约",
+      "path": "FMA Post+投影 partial → big_fuse",
+      "why": "T≤16；此路径仍有第二个 epilogue launch。",
+      "source": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L713"
+    },
+    {
+      "input": "V4，SGLang #25976，T=64，DeepGEMM prenorm opt-in",
+      "path": "TileLang Post → DeepGEMM prenorm → big_fuse",
+      "why": "T>32；大 batch 选择 tensor-core producer。",
+      "source": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1315"
+    },
+    {
+      "input": "V4.1，vLLM #56962，普通 shifted 边界，SM100，HC4，H=5120，T=8，旧 Pre/Norm 存在",
+      "path": "Mega 候选",
+      "why": "满足 wrapper 门槛；若需要 auxiliary capture 或进入 Engram 特殊边界则回 TileLang/分离路径。",
+      "source": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py#L112-L156"
+    },
+    {
+      "input": "V4.1，SGLang #42808，CP prefill 或需 fused collective",
+      "path": "既有 CP/collective/fallback 路径",
+      "why": "CP prefill 排除 Mega；AttnOutput 或 deferred MoE collective 优先。",
+      "source": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L572-L760"
+    },
+    {
+      "input": "V4.1，SGLang #42808，decode/target verify，stats-stream opt-in，shifted",
+      "path": "系数可安排到 side stream；Post 前 join，之后再看 Mega/collective gate",
+      "why": "side-stream phase gate 与 Mega gate 是不同判断；实际 GPU overlap 未测。",
+      "source": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L222-L247"
+    }
+  ],
+  "evidence": {
+    "status": "source-audited; no local GPU reproduction",
+    "correctness": "DeepGEMM repository test includes a PyTorch reference and shape/mode/output matrix; execution not reproduced in this workspace.",
+    "performance": "DeepGEMM #432 reports 45–85% kernel speedups without a full workload/baseline/trial specification in its release text. vLLM #56962 reports separate GB200 stage and TP4 serving results. None were reproduced here; a bench_kineto call in the upstream test is not a result.",
+    "unknowns": [
+      "SM100 profiler counters and physical HBM/L2 traffic",
+      "actual compiler register count and occupancy",
+      "same-hardware, same-workload baseline vs prior fused paths",
+      "framework-specific routing to Mega mHC and fallback for a named model configuration"
+    ]
+  },
+  "experiments": [
+    {
+      "hypothesis": "At small T, more K splits expose enough tasks to reduce producer latency, until scratch and Mix reduction dominate.",
+      "prediction": "Increasing split count should first lower then flatten or raise latency on fixed SM100, H and T.",
+      "controls": "same SM100, T/H, mode, output dtype, warmup, CUDA Graph state; compare split policies only where the API permits",
+      "status": "proposed"
+    },
+    {
+      "hypothesis": "Normal fused worker reuse saves launch and intermediate I/O against the separate path at identical math boundaries.",
+      "prediction": "Profiler should show fewer launches and lower intermediate traffic; numerical differences must be checked at BF16 boundaries.",
+      "controls": "same device, tensor distribution, output contract, graph mode, trial count",
+      "status": "proposed"
+    },
+    {
+      "hypothesis": "Shifted mode's prior-Pre dependency can overlap coefficient production with current output normalization more effectively than normal mode.",
+      "prediction": "A trace should show Norm work before the current Mix completes, without a stale-coefficient read.",
+      "controls": "same model layer call order and stream/event dependencies; compare traces, not only end-to-end latency",
+      "status": "proposed"
+    }
+  ],
+  "teaching_v2": {
+    "order": [
+      "operator",
+      "dispatch",
+      "small-t"
+    ],
+    "diagram_type": "conceptual",
+    "small_t_example": {
+      "tokens": 4,
+      "hidden": 4096,
+      "hc_mult": 4,
+      "tile_n": 2,
+      "splits": 8,
+      "threads": 256,
+      "column_tiles": 12,
+      "producer_ctas": 384,
+      "hidden_per_split": 512,
+      "hidden_iterations_per_thread": 2,
+      "projection_flops": 3145728,
+      "fn_storage_bytes": 1572864,
+      "residual_storage_bytes": 131072,
+      "partial_storage_bytes": 3200,
+      "note": "Shared T4 Normal shape for historical V4 FMA and Mega API geometry; model versions and precision boundaries differ. Mega's pinned test enumerates T1 and T64, not T4. Counts are source-derived, not concurrent residency or measurements.",
+      "sources": [
+        "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L713",
+        "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L418-L533",
+        "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1315"
+      ]
+    },
+    "operator_profiles": [
+      {
+        "name": "Post + Comb",
+        "shape": "[T,4,H] → [T,4,H]",
+        "tags": [
+          "bandwidth?",
+          "launch?"
+        ],
+        "reason": "每个 hidden 坐标只混合四路，但必须读旧状态、x 并保留 BF16 新状态。低 T 下启动成本可能显著；缓存与实际带宽未知。",
+        "source": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L828-L905",
+        "falsifier": "若 HBM/L2 流量不高且 Graph capture 后差距消失，更支持 launch 而非 bandwidth 假设；需同形状延迟与 profiler。"
+      },
+      {
+        "name": "4H → 24 投影 + 平方和",
+        "shape": "[T,4H] × [4H,24]",
+        "tags": [
+          "reduction?",
+          "parallelism?",
+          "compute?"
+        ],
+        "reason": "输出窄、归约长。小 T token 并行少，split-K 增加任务；大 T 增加 Fn 复用机会。实际 bound 随 T、tile 与设备变化。",
+        "source": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1064-L1145",
+        "falsifier": "扫描 T、split_K 与 FMA/TC 路径；若更多任务不降低延迟或退化，反驳并行任务不足的单一解释。"
+      },
+      {
+        "name": "Pre/Post + Comb",
+        "shape": "8 个 sigmoid ∥ 4×4 Sinkhorn / token",
+        "tags": [
+          "dependency?",
+          "launch?"
+        ],
+        "reason": "小张量分支；Sinkhorn 迭代有串行归约依赖。独立启动可能昂贵，不能由矩阵小推断其耗时可忽略。",
+        "source": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L81-L149",
+        "falsifier": "固定 T/H 扫 Sinkhorn 迭代数，观察 stage 时长是否随迭代增长；若变化很小，不能称其主导。"
+      },
+      {
+        "name": "Collapse + 输出 RMSNorm",
+        "shape": "4H → H → H / token",
+        "tags": [
+          "bandwidth?",
+          "reduction?"
+        ],
+        "reason": "Collapse 读取四路，Norm 沿 H 归约。Normal 等新 Pre；Shifted 允许独立输出支路，但必须等 BF16 中间值和统计。",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L656-L699",
+        "falsifier": "在同精度边界比较融合/分离 Norm，测 DRAM/L2 与归约时长；若流量降低而延迟不变，bandwidth 解释不足。"
+      }
+    ],
+    "formula_contract": {
+      "coefficient_partition": [
+        4,
+        4,
+        16
+      ],
+      "hc_rms_denominator": "4H",
+      "output_rms_denominator": "H",
+      "pre": "sigmoid(a_pre) + hc_pre_eps",
+      "post": "hc_post_scale * sigmoid(a_post)",
+      "sinkhorn": [
+        "row_softmax(a_comb) + sinkhorn_eps",
+        "column divide by column sum + sinkhorn_eps",
+        "repeat-1 iterations of row divide then column divide; add sinkhorn_eps to each denominator"
+      ],
+      "rounding": [
+        "Post produces BF16 Rprime in fixed Mega reference",
+        "Collapse produces BF16 z before output RMSNorm",
+        "BF16 output y before optional FP8 conversion"
+      ],
+      "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/tests/test_mega_mhc.py#L114-L214"
+    },
+    "sinkhorn_example": {
+      "input": [
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          3
+        ]
+      ],
+      "row_normalized": [
+        [
+          "2/3",
+          "1/3"
+        ],
+        [
+          "1/4",
+          "3/4"
+        ]
+      ],
+      "column_sums": [
+        "11/12",
+        "13/12"
+      ],
+      "column_normalized": [
+        [
+          "8/11",
+          "4/13"
+        ],
+        [
+          "3/11",
+          "9/13"
+        ]
+      ],
+      "row_sums_after_column": [
+        "148/143",
+        "138/143"
+      ],
+      "scope": "Nonuniform positive 2x2 toy; omits initial softmax and epsilon. Explains alternating normalization only; actual kernel is 4x4 and follows fixed reference."
+    },
+    "threshold_examples": [
+      {
+        "tokens": 16,
+        "vllm": "FMA + big_fuse",
+        "sglang": "FMA + big_fuse"
+      },
+      {
+        "tokens": 17,
+        "vllm": "Post + DeepGEMM + big_fuse",
+        "sglang": "FMA + big_fuse"
+      },
+      {
+        "tokens": 32,
+        "vllm": "Post + DeepGEMM + big_fuse",
+        "sglang": "FMA + big_fuse"
+      },
+      {
+        "tokens": 33,
+        "vllm": "Post + DeepGEMM + big_fuse",
+        "sglang": "Post + (DeepGEMM opt-in / TileLang) + big_fuse"
+      }
+    ]
+  },
+  "teaching_v4": {
+    "status": "source-derived arithmetic and copy extents; no GPU measurement",
+    "worked_ledger": {
+      "tokens": 4,
+      "hidden": 4096,
+      "hc_mult": 4,
+      "coefficient_count": 24,
+      "column_tiles": 12,
+      "post_once_flops": 589824,
+      "post_repeated_flops": 7077888,
+      "projection_flops": 3145728,
+      "fma_partial_allocated_bytes": 3200,
+      "mega_default_splits": 64,
+      "mega_default_scratch_bytes": 425984,
+      "mega_fixed_splits": 16,
+      "mega_fixed_scratch_bytes": 106496,
+      "flop_convention": "source expression count: multiplication=1, FMA=2; excludes reductions, Sinkhorn, Norm and compiled instruction count",
+      "vllm_post_source": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L485-L504",
+      "mega_layout_source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/layout/mega_mhc.cuh#L82-L106"
+    },
+    "pipeline": {
+      "default_k_blocks_per_split": 1,
+      "fixed16_k_blocks_per_split": 4,
+      "io_stages": 4,
+      "fn_stages": 2,
+      "a_stages": 4,
+      "accum_stages": 2,
+      "diagram_type": "conceptual source-derived ordering, no time scale",
+      "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L185-L280"
+    },
+    "access_contract": [
+      {
+        "stage": "Mega TMA per K block",
+        "scope": "per token block and 64-hidden K block",
+        "logical_copy_bytes": 65536,
+        "breakdown": "BF16 x + four-route R 40960 B; FP32 Fn 24576 B",
+        "boundary": "padded TMA extent, not HBM traffic"
+      },
+      {
+        "stage": "Mega coefficient TMA",
+        "scope": "per Normal task, including 64 row slots",
+        "logical_copy_bytes": 5120,
+        "breakdown": "20 channels × 64 rows × 4 B",
+        "boundary": "task copy extent, not unique coefficient bytes"
+      },
+      {
+        "stage": "Mega scratch",
+        "scope": "per task",
+        "allocated_bytes": 6656,
+        "breakdown": "FP32 GEMM 64×24 + HC sqrsum 64 + X1 sqrsum 64",
+        "boundary": "Normal allocates X1 sqrsum slot but Shifted-only write path means allocation is not actual traffic"
+      }
+    ],
+    "epilogue_stages": [
+      {
+        "stage": "Mix",
+        "scope": "per token",
+        "reads": "S HC-square partials and 24×S semantic GEMM partials; 32 lanes issue scratch loads and lanes 24–31 alias output 23",
+        "computes": "split reductions, HC reciprocal sqrt, 24 affine transforms",
+        "special": "8 sigmoid evaluations including exp/reciprocal; Comb receives 16 affine values",
+        "writes": "Post[4] and Comb[4,4] global; Normal Pre[4] is broadcast for internal Collapse, Shifted writes new Pre[4] global for the next seam",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh#L19-L96"
+      },
+      {
+        "stage": "Sinkhorn",
+        "scope": "per token, I configured iterations, I≥1",
+        "reads": "Comb 4×4 affine values; row/column intermediate stays inside worker",
+        "computes": "initial row softmax then column normalization; remaining I−1 rounds each do row then column normalization, yielding I row and I column passes",
+        "special": "16 effective Comb exp inputs but source invokes exp in 32 lanes; reductions, epsilon and reciprocal; later normalization has no new exp. Compiled instruction count is unknown",
+        "writes": "near doubly stochastic Comb[4,4]",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh#L63-L96"
+      },
+      {
+        "stage": "Normal Collapse/Norm",
+        "scope": "per token",
+        "reads": "BF16 R′: 4H values, norm weight: H values; current Pre[4]",
+        "computes": "per h four weighted route FMA (8 expression FLOP), BF16 collapse rounding, square-sum and final two multiplies; reduction and reciprocal sqrt separate",
+        "special": "rsqrt; optional FP8 conversion",
+        "writes": "normalized [H] output; Collapse X1 remains in registers",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh#L138-L227"
+      },
+      {
+        "stage": "Shifted Collapse/Norm",
+        "scope": "per token",
+        "reads": "carried Pre[4] and R′ feed Post-side Collapse; Norm reads global BF16 X1: H values, weight: H values, and S X1-square partials",
+        "computes": "Post-side four-route Collapse, X1-square split reduction, reciprocal sqrt, final two multiplies per h",
+        "special": "rsqrt; optional FP8 conversion",
+        "writes": "BF16 X1 [H] plus X1-square split partial, then normalized [H] output",
+        "source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/epilogue/sm100_mega_mhc.cuh#L302-L399",
+        "collapse_source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L479-L505",
+        "partial_source": "https://github.com/deepseek-ai/DeepGEMM/blob/5081f8513af57e61696de4f4f04b0e707ffb503e/deep_gemm/include/deep_gemm/impls/sm100_mega_mhc.cuh#L360-L376"
+      }
+    ]
+  },
+  "teaching_v3": {
+    "shared_scenario": {
+      "tokens": 4,
+      "hidden": 4096,
+      "hc_mult": 4,
+      "mode": "normal",
+      "num_sms_assumed": 132,
+      "status": "source-derived shape comparison, not a shared framework dispatch trace"
+    },
+    "comparison_constraints": [
+      "vLLM and SGLang are V4 historical wrapper snapshots",
+      "Mega Normal is a DeepGEMM API shape example on SM100",
+      "vLLM FP32 local projection and SGLang BF16 rounded projection are numerically different"
+    ],
+    "memory_edges": [
+      {
+        "id": "fma_producer",
+        "name": "TileLang FMA producer",
+        "reads": "old R, x, old Post/Comb, Fn columns",
+        "computes": "Post + 4H→2 FMA partial; 8 hidden splits",
+        "writes": "BF16 R′ and FP32 partial/sqrsum",
+        "boundary": "global scratch then another big_fuse launch"
+      },
+      {
+        "id": "fma_consumer",
+        "name": "TileLang big_fuse",
+        "reads": "all 8 split partials and BF16 R′",
+        "computes": "HC RMS; Pre/Post sigmoid ∥ Comb Sinkhorn; Collapse; optional Norm",
+        "writes": "new coefficients and H-wide output",
+        "boundary": "separate CTA / launch"
+      },
+      {
+        "id": "mega_producer",
+        "name": "Mega WG0–3",
+        "reads": "TMA x/R/Fn and prior coefficients",
+        "computes": "WG1–2 Post; WG0 TF32 UMMA; WG3 partial",
+        "writes": "BF16 R′ and FP32 scratch",
+        "boundary": "same launch; inter-CTA split barrier"
+      },
+      {
+        "id": "mega_consumer",
+        "name": "Mega Mix/Norm",
+        "reads": "all split partials; R′; Pre by mode",
+        "computes": "HC RMS; sigmoid ∥ Sinkhorn; Collapse/RMSNorm",
+        "writes": "new coefficients and normalized output",
+        "boundary": "same launch; synchronization and scratch remain"
+      }
+    ]
+  },
+  "reading_scenes": [
+    {
+      "id": "routes",
+      "kind": "routes",
+      "label": "四路残差",
+      "question": "四路状态，为什么只送一路进子层？",
+      "claim": "mHC 扩展跨层残差；Attention / FFN 本体仍接收 H 宽激活。",
+      "source_ids": [
+        "post",
+        "api"
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "routes-1",
+          "title": "先收束",
+          "body": "Pre 是每 token 的四个权重。Collapse（收束）将四路各乘其权重，再沿 route 轴求和，得到 [T,H]；首图省略系数预测。"
+        },
+        {
+          "id": "routes-2",
+          "title": "子层保持 H 宽",
+          "body": "RMSNorm 后进入 Attention 或 FFN/MoE，产生子层输出 xℓ。"
+        },
+        {
+          "id": "routes-3",
+          "title": "两路输入共同更新",
+          "body": "Post 分发 xℓ，Comb 独立混合旧 Rℓ；每条新路都接收两者之和。"
+        }
+      ],
+      "step_sources": [
+        "reference",
+        "reference",
+        "post"
+      ]
+    },
+    {
+      "id": "dag",
+      "kind": "dag",
+      "label": "算子依赖",
+      "question": "从子层输出，到下一子层输入",
+      "claim": "固定在 Postℓ → Preℓ+1 接缝；先明确本次投影读取 Rℓ+1。",
+      "source_ids": [
+        "post",
+        "mix",
+        "norm"
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "dag-1",
+          "title": "残差先更新",
+          "body": "已就绪 xℓ、旧 Rℓ 与旧系数生成 BF16 Rℓ+1。"
+        },
+        {
+          "id": "dag-2",
+          "title": "宽归约，窄输出",
+          "body": "四路展开后投影：4H 个输入生成 24 个 logits，并统计 HC RMS。"
+        },
+        {
+          "id": "dag-3",
+          "title": "系数输出是兄弟分支",
+          "body": "前 8 项产生 Pre/Post，后 16 项进入 Sinkhorn；两支不互相依赖。"
+        },
+        {
+          "id": "dag-4",
+          "title": "模式决定谁进入 Collapse",
+          "body": "Collapse = 四路加权求和。Normal 用本次 Rℓ+1 预测的新 Pre；Shifted 用上一接缝已预测并携入的 Pre，本次预测的新 Pre留待下一接缝。两者是不同模型契约。"
+        }
+      ],
+      "step_sources": [
+        "post",
+        "reference",
+        "mix",
+        "reference"
+      ]
+    },
+    {
+      "id": "sinkhorn",
+      "kind": "sinkhorn",
+      "label": "Sinkhorn",
+      "question": "Sinkhorn：交替校正行与列",
+      "claim": "列归一化会改变行和，所以需要交替校正。",
+      "source_ids": [
+        "mix",
+        "reference"
+      ],
+      "steps": [
+        {
+          "id": "sinkhorn-1",
+          "title": "先看正矩阵",
+          "body": "两路例子从 [[2,1],[1,3]] 开始，行和分别为 3、4；只用来说明交替归一化，实际 kernel 有四路。"
+        },
+        {
+          "id": "sinkhorn-2",
+          "title": "行归一化后，列还没有归一",
+          "body": "每一行除以自己的和，行和都为 1，但列和为 11/12、13/12。"
+        },
+        {
+          "id": "sinkhorn-3",
+          "title": "列归一化，又改变了行和",
+          "body": "按列校正后列和为 1，行和变成 148/143、138/143，需要继续交替。实际实现还包含初始 softmax 与 epsilon。"
+        }
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。"
+    },
+    {
+      "id": "dispatch-map",
+      "kind": "dispatch",
+      "label": "框架分流",
+      "question": "框架怎样决定能否进入 Mega？",
+      "claim": "框架 caller、模型接缝、并行与硬件共同选择路径；保留成熟 fallback。",
+      "source_ids": [
+        "api",
+        "split"
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "dispatch-map-1",
+          "title": "caller 是第一层条件",
+          "body": "模型版本、首层/Engram 等特殊边界、collective 和 phase 会改变候选路径。"
+        },
+        {
+          "id": "dispatch-map-2",
+          "title": "库 API 资格不是完整 dispatch",
+          "body": "SM100、HC=4、H 可被 1024 整除等只是部分条件；还需满足对应框架完整谓词。"
+        },
+        {
+          "id": "dispatch-map-3",
+          "title": "边界两侧都有可解释路径",
+          "body": "旧 V4 的 T 阈值与 V4.1 Mega gate 属于不同快照。完整条件与反例在讲义中，不直接按 prefill/decode 标签推断。"
+        }
+      ],
+      "external_sources": [
+        {
+          "url": "https://github.com/vllm-project/vllm/blob/91368b7e2330d9b36e86c6ca54c7a938efcca29b/vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py#L19-L156",
+          "label": "vLLM gate"
+        },
+        {
+          "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L572-L612",
+          "label": "SGLang gate"
+        }
+      ],
+      "interactive": false
+    },
+    {
+      "id": "fma",
+      "kind": "fma",
+      "label": "FMA CTA",
+      "question": "先走一遍旧融合的 producer",
+      "claim": "一个 CTA 读、算、写的边界决定 fusion 的收益与代价。",
+      "source_ids": [],
+      "external_sources": [
+        {
+          "url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L418-L533",
+          "label": "vLLM FMA producer"
+        },
+        {
+          "url": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L908-L1145",
+          "label": "SGLang FMA producer"
+        }
+      ],
+      "steps": [
+        {
+          "id": "fma-1",
+          "title": "先读本 split 的输入",
+          "body": "选 token 0、列 tile 0、split 0：每路 hidden 0…511。CTA 读取旧状态 R、子层输出 x 和旧 Post/Comb；这里只统计逻辑输入范围。"
+        },
+        {
+          "id": "fma-2",
+          "title": "四路更新，局部复用",
+          "body": "每个 hidden 坐标计算 4 个新 residual 值。它们留在本 CTA 的局部数据中，接着用于对应两列的投影。"
+        },
+        {
+          "id": "fma-3",
+          "title": "两列点积，再归约",
+          "body": "读取对应 Fn 权重，做 FP32 FMA，先 warp 内、再通过 shared 做跨 warp 汇总。寄存器数与物理事务未测。"
+        },
+        {
+          "id": "fma-4",
+          "title": "写回仍然存在",
+          "body": "所有列 tile 写投影 partial；只有 tile 0 写 BF16 R′与平方和。下一次 big_fuse launch 消费所有 split 结果。"
+        }
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。"
+    },
+    {
+      "id": "work",
+      "kind": "work",
+      "label": "计算账本",
+      "question": "并行任务更多，也可能重复更多计算",
+      "claim": "旧小 T producer 按输出列 tile 拆分，同一 Post 被 12 个 tile 重新计算。",
+      "source_ids": [],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "work-1",
+          "title": "数学上只需一次",
+          "body": "Post 每 hidden 坐标 4 次乘法 + 16 次乘加；T×H×36 = 589,824 FLOP。"
+        },
+        {
+          "id": "work-2",
+          "title": "列方向拆分带来重算",
+          "body": "24 个输出、tile_n=2，共 12 列 tile；Post 总表达式计算为 7,077,888 FLOP。"
+        },
+        {
+          "id": "work-3",
+          "title": "GEMM 不能代表全部工作",
+          "body": "有效投影为 3,145,728 FLOP；归约、Sinkhorn、Norm 和特殊函数需要另列。"
+        }
+      ],
+      "external_sources": [
+        {
+          "url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L485-L504",
+          "label": "旧 vLLM producer 的重算循环"
+        }
+      ]
+    },
+    {
+      "id": "fusion",
+      "kind": "fusion",
+      "label": "融合边界",
+      "question": "从局部 fusion，到同一 launch 内汇合",
+      "claim": "把同一算子 DAG 放进不同 launch 容器，检查中间值是否仍要写回。",
+      "source_ids": [
+        "post",
+        "partials",
+        "mix"
+      ],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "fusion-1",
+          "title": "旧融合留下第二次 launch",
+          "body": "FMA producer 合并 Post 与投影 partial；big_fuse 仍另起 launch 读取 split 结果。"
+        },
+        {
+          "id": "fusion-2",
+          "title": "先保留数值比较边界",
+          "body": "旧 vLLM 用局部 FP32 R′ 投影；SGLang 投影前舍入 BF16，并可在 big_fuse 加 Norm。它们不是逐位等价的比较。"
+        },
+        {
+          "id": "fusion-3",
+          "title": "Mega 移动 consumer，不消除全部存储",
+          "body": "Mix/Norm 在同一 persistent launch 中消费结果，但 global 残差、scratch 与 barrier 仍在。"
+        }
+      ],
+      "external_sources": [
+        {
+          "url": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L713",
+          "label": "vllm_fused"
+        },
+        {
+          "url": "https://github.com/sgl-project/sglang/blob/48c47c571038d7d651431d7b649a14e2ecb83e23/python/sglang/srt/layers/mhc.py#L1231-L1315",
+          "label": "sglang_fused"
+        }
+      ],
+      "interactive": false
+    },
+    {
+      "id": "mega-map",
+      "kind": "mega-map",
+      "label": "Mega 总体分工",
+      "question": "一次 launch，谁分配任务，谁完成消费？",
+      "claim": "persistent CTA 是工厂；split task 是它领取的工作，不是新的 CTA。",
+      "mental_model": "persistent CTA 是工厂；split task 是它领取的工作，不是新的 CTA。",
+      "data_basis": "固定 DeepGEMM SHA 的 launch, assign, roles, norm",
+      "visual_type": "mega-map",
+      "what_to_read": "沿 token block → split task → CTA → WG 阅读",
+      "conclusion": "同一 CTA 内的 worker 分工和退休接力取代了多个独立 launch。",
+      "interaction_or_static_reason": "读者选择模式/任务，追踪同一数据；不编码时间",
+      "source_ids": [
+        "launch",
+        "assign",
+        "roles",
+        "norm"
+      ],
+      "steps": [
+        {
+          "id": "mega-map-1",
+          "title": "先区分 CTA 和 task",
+          "body": "固定 T4/H4096，token 被放入一个 64 行块。S 个 split task 由 132 个 CTA 按 grid-stride 分配；CTA 没有 producer task 时仍可能参加 consumer。"
+        }
+      ],
+      "boundary": "conceptual / source-derived；没有测量时间比例",
+      "interactive": false
+    },
+    {
+      "id": "mega-post",
+      "kind": "mega-post",
+      "label": "Post 与矩阵引擎",
+      "question": "四路更新值怎样变成 UMMA 输入？",
+      "claim": "一个 lane 更新两个 token 行和两个 hidden 值；更新值服务全部24列，不再按输出列重算 Post。",
+      "mental_model": "一个 lane 更新两个 token 行和两个 hidden 值；更新值服务全部24列，不再按输出列重算 Post。",
+      "data_basis": "固定 DeepGEMM SHA 的 post_map, post, post_publish, mma_ring",
+      "visual_type": "mega-post",
+      "what_to_read": "选 WG、warp、lane 和 atom；区分行槽位与有效 token",
+      "conclusion": "BF16 是共同数值边界；local、shared、TMEM 与 global 各有不同消费者。",
+      "interaction_or_static_reason": "读者选择模式/任务，追踪同一数据；不编码时间",
+      "source_ids": [
+        "post_map",
+        "post",
+        "post_publish",
+        "mma_ring"
+      ],
+      "steps": [
+        {
+          "id": "mega-post-1",
+          "title": "先选一个 Post lane",
+          "body": "先看两组 WG 交错的 atom，再沿选中的 hidden 对追到 shared、TMEM 和平方和。"
+        }
+      ],
+      "boundary": "conceptual / source-derived；没有测量时间比例",
+      "interactive": false
+    },
+    {
+      "id": "pipeline",
+      "kind": "pipeline",
+      "label": "可复用 buffer",
+      "question": "下一份数据为什么还要等待？",
+      "claim": "可 overlap 的是不同数据/不同引擎的工作；同一槽必须消费完再复用。",
+      "mental_model": "可 overlap 的是不同数据/不同引擎的工作；同一槽必须消费完再复用。",
+      "data_basis": "固定 DeepGEMM SHA 的 load, post_publish, mma_ring, io_store, partials",
+      "visual_type": "pipeline",
+      "what_to_read": "步进观察 A0…A3 的占有与释放，再对照其他 buffer 的生命周期",
+      "conclusion": "A stage、IO stage、Fn stage 和 accumulator 的周转粒度不同。",
+      "interaction_or_static_reason": "读者选择模式/任务，追踪同一数据；不编码时间",
+      "source_ids": [
+        "load",
+        "post_publish",
+        "mma_ring",
+        "io_store",
+        "partials"
+      ],
+      "steps": [
+        {
+          "id": "pipeline-1",
+          "title": "输入到齐，还要等 A",
+          "body": "R/x 与 Fn 是独立 TMA 流。TMA 是异步搬运机制；UMMA 是 SM100 矩阵引擎操作，既不替代 Post，也不替代显式等待。"
+        },
+        {
+          "id": "pipeline-2",
+          "title": "两个 Post worker 交错供料",
+          "body": "WG1 负责 a0/a2/a4/a6，WG2 负责 a1/a3/a5/a7；每个 atom 是每路 8 个 hidden。两组写不同 A 槽，UMMA 按源码顺序消费。"
+        },
+        {
+          "id": "pipeline-3",
+          "title": "A 槽释放，不等于整个块释放",
+          "body": "UMMA 消费 a0 后发布 empty_a[0]；IO 槽仍保存整个 64-hidden block。Fn 必须等八个 atom 都消费完。"
+        },
+        {
+          "id": "pipeline-4",
+          "title": "第5个 atom 再用第1个槽",
+          "body": "跨过 a1…a3 的消费后，a4 可以重用 A0。这里只演示一种合法先后关系，不表示硬件恰好按此快照调度。"
+        },
+        {
+          "id": "pipeline-5",
+          "title": "整份 split 完成，才交给 WG3",
+          "body": "S64 每 task 一个 K block；S16 每 task 四个 K block，累加到同一份 [64,24]。WG3 等 full_accum，写 partial 后释放；Mix 还要跨 split join。"
+        }
+      ],
+      "boundary": "conceptual / source-derived；没有测量时间比例",
+      "interactive": true
+    },
+    {
+      "id": "mega-join",
+      "kind": "mega-join",
+      "label": "消费者与同步",
+      "question": "partial 齐了以后，谁真正生成下一输入？",
+      "claim": "Normal 消费新 Pre；Shifted 消费携入 Pre，因此消费者位置和同步域不同。",
+      "mental_model": "Normal 消费新 Pre；Shifted 消费携入 Pre，因此消费者位置和同步域不同。",
+      "data_basis": "固定 DeepGEMM SHA 的 partials, io_store, mix, normal_worker, norm, norm_math, split_barrier",
+      "visual_type": "mega-join",
+      "what_to_read": "先看等待条件，再沿 Pre 和 R′/X1 的两路数据追到输出",
+      "conclusion": "一次 launch 仍保留 global scratch、global R′ 和 release/acquire 同步。",
+      "interaction_or_static_reason": "读者选择模式/任务，追踪同一数据；不编码时间",
+      "source_ids": [
+        "partials",
+        "io_store",
+        "mix",
+        "normal_worker",
+        "norm",
+        "norm_math",
+        "split_barrier"
+      ],
+      "steps": [
+        {
+          "id": "mega-join-1",
+          "title": "先对齐两种模型契约",
+          "body": "Normal 中一个128线程 WG完成一个token的 Mix→Collapse→Norm。Shifted 中 WG4 生成系数，WG5及退休Post worker消费另一路 X1。"
+        }
+      ],
+      "boundary": "conceptual / source-derived；没有测量时间比例",
+      "interactive": false
+    },
+    {
+      "id": "overlap",
+      "kind": "overlap",
+      "label": "双流重叠",
+      "question": "两条 CUDA stream，必须在哪里汇合？",
+      "claim": "V4.1 特定 caller 可以从同一 Rℓ 分出主流与系数预测流；资格条件决定是否启用。",
+      "source_ids": [],
+      "boundary": "概念机制与源码推导；没有硬件时间比例。",
+      "steps": [
+        {
+          "id": "overlap-1",
+          "title": "同一个状态，两项独立工作",
+          "body": "这是 caller 的 Rℓ→两分支视角，与 Post 完成后投影 Rℓ+1 的接缝视角不同。"
+        },
+        {
+          "id": "overlap-2",
+          "title": "主流和 stats 流各自推进",
+          "body": "主流消费携入 Pre 并执行子层，stats 流预测当前需要的新系数；二者可能争用资源。"
+        },
+        {
+          "id": "overlap-3",
+          "title": "Post 是必须的汇合点",
+          "body": "Post 同时需要子层输出和系数。存在并发机会，不代表实际隐藏了多少延迟；必须用 trace 验证。"
+        }
+      ],
+      "external_sources": [
+        {
+          "label": "SGLang side stream",
+          "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L222-L247"
+        },
+        {
+          "label": "SGLang join",
+          "url": "https://github.com/sgl-project/sglang/blob/0ac7ee38c478632aee85c6537106abc37c52bdd5/python/sglang/srt/models/deepseek_v4_mhc.py#L559-L568"
+        }
+      ]
+    }
+  ],
+  "lesson_plan": {
+    "version": 8,
+    "path": [
+      "operator",
+      "dispatch",
+      "small-t"
+    ],
+    "chapters": [
+      {
+        "id": "operator",
+        "question": "四路残差怎样包住一个子层？",
+        "scenes": [
+          "routes",
+          "dag",
+          "sinkhorn"
+        ]
+      },
+      {
+        "id": "dispatch",
+        "question": "框架如何从 caller 决定路径？",
+        "scenes": [
+          "dispatch-map"
+        ]
+      },
+      {
+        "id": "small-t",
+        "question": "小 T 的瓶颈假设怎样引出实现取舍？",
+        "scenes": [
+          "fma",
+          "work",
+          "fusion",
+          "mega-map",
+          "mega-post",
+          "pipeline",
+          "mega-join",
+          "overlap"
+        ]
+      }
+    ],
+    "design": "warm editorial; one continuous explanation; local code drawer; no duplicate reference lecture"
+  },
+  "teaching_v6": {
+    "operation_legend": [
+      {
+        "code": "EW",
+        "name": "逐元素 elementwise",
+        "meaning": "各位置独立乘加、激活或缩放；允许广播。"
+      },
+      {
+        "code": "REDUCE",
+        "name": "归约 reduce",
+        "meaning": "沿指定轴合并多个值，例如平方和、加权和。"
+      },
+      {
+        "code": "MM",
+        "name": "矩阵乘 matmul",
+        "meaning": "输入矩阵与权重相乘；实现可用 FMA 或矩阵引擎。"
+      },
+      {
+        "code": "MOVE",
+        "name": "搬运 / 格式转换",
+        "meaning": "复制数据或进行 BF16 等舍入。"
+      }
+    ],
+    "fma_mapping": {
+      "tokens": 4,
+      "column_tiles": 12,
+      "splits": 8,
+      "threads": 256,
+      "warp_size": 32,
+      "hidden": 4096,
+      "tile_n": 2,
+      "default_thread": 37,
+      "source": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L418-L533"
+    }
+  },
+  "teaching_v7": {
+    "scope": "vLLM V4 PR #41536 historical source-derived producer model; no runtime reproduction",
+    "producer_name": "mhc_fused_tilelang",
+    "consumer_name": "mhc_pre_big_fuse_tilelang",
+    "wrapper_name": "mhc_fused_post_pre",
+    "hidden": 4096,
+    "routes": 4,
+    "outputs": 24,
+    "threads": 256,
+    "sources": {
+      "producer": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L418-L533",
+      "consumer": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L48-L177",
+      "wrapper": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L555-L719",
+      "policy": "https://github.com/vllm-project/vllm/blob/84168f3c4379aaa6e93528475a0d7abcefbe35af/vllm/model_executor/layers/mhc.py#L615-L638"
+    },
+    "binding_gap": "wrapper passes n_splits at L673 while JIT function declares split_k at L433; actual binding not reproduced",
+    "t_examples": [
+      {
+        "tokens": 1,
+        "tile_n": 2,
+        "splits": 8
+      },
+      {
+        "tokens": 4,
+        "tile_n": 2,
+        "splits": 8
+      },
+      {
+        "tokens": 7,
+        "tile_n": 2,
+        "splits": 8
+      },
+      {
+        "tokens": 8,
+        "tile_n": 3,
+        "splits": 4
+      },
+      {
+        "tokens": 16,
+        "tile_n": 3,
+        "splits": 4
+      }
+    ]
+  },
+  "mega_walkthrough": {
+    "version": 8,
+    "tokens": 4,
+    "hidden": 4096,
+    "routes": 4,
+    "outputs": 24,
+    "sms_assumed": 132,
+    "tile_m": 64,
+    "tile_k": 64,
+    "atom_hidden": 8,
+    "threads": 768,
+    "warps_per_wg": 4,
+    "num_wgs": 6,
+    "mental_model": "一套驻留 CTA 内，让不同 worker 生产、搬运、投影与消费；内存边界和就绪条件仍由显式协议连接。",
+    "basis": [
+      "launch",
+      "assign",
+      "roles",
+      "post_map",
+      "post_publish",
+      "mma_ring",
+      "io_store",
+      "normal_worker",
+      "norm",
+      "split_barrier"
+    ],
+    "roles": [
+      {
+        "wg": "WG0",
+        "warps": "0–3",
+        "name": "控制与矩阵乘",
+        "read": "warp0: R/x TMA；warp1: Fn TMA；warp2: UMMA；warp3: 系数预取与 R′ store",
+        "normal": "静态角色结束 → Normal 消费池",
+        "shifted": "保持控制角色直至结束"
+      },
+      {
+        "wg": "WG1/2",
+        "warps": "4–11",
+        "name": "两组 Post worker",
+        "read": "交替处理 8-hidden atom，更新四路 R′、平方和、TMEM A；Shifted 同时 Collapse",
+        "normal": "各自结束 → Normal 消费池",
+        "shifted": "各自结束 → Shifted Norm 队列"
+      },
+      {
+        "wg": "WG3",
+        "warps": "12–15",
+        "name": "partial 写回",
+        "read": "从 TMEM 取 64×24 累加结果；写 global partial/HC 平方和并发布 Mix arrival",
+        "normal": "结束 → Normal 消费池",
+        "shifted": "保持 partial 角色直至结束"
+      },
+      {
+        "wg": "WG4",
+        "warps": "16–19",
+        "name": "按模式消费",
+        "read": "Normal：立即进入单 token 消费池；Shifted：每 warp 生成一个 token 的系数",
+        "normal": "Mix → Collapse → Norm",
+        "shifted": "Mix → 新 Pre/Post/Comb"
+      },
+      {
+        "wg": "WG5",
+        "warps": "20–23",
+        "name": "按模式消费",
+        "read": "Normal：立即进入单 token 消费池；Shifted：立即进入 X1 Norm 队列",
+        "normal": "Mix → Collapse → Norm",
+        "shifted": "等 X1 + 平方和 → Norm"
+      }
+    ],
+    "costs": [
+      {
+        "name": "Post/Comb",
+        "unit": "表达式 FLOP",
+        "effective": 589824,
+        "tile": 9437184,
+        "formula": "36·T·H；tile 口径用 64 行"
+      },
+      {
+        "name": "系数投影",
+        "unit": "矩阵 FLOP 模型",
+        "effective": 3145728,
+        "tile": 50331648,
+        "formula": "2·T·4H·24；tile 口径用 64 行"
+      }
+    ],
+    "pipeline_states": [
+      {
+        "a": [
+          "空",
+          "空",
+          "空",
+          "空"
+        ],
+        "io": "K0 的 R/x 已到 shared",
+        "fn": "K0 的 Fn 已到 shared",
+        "mma": "等待 A0 的 full_a",
+        "event": "两个输入流独立到达；Fn 到齐也不能跳过 A 的等待。"
+      },
+      {
+        "a": [
+          "a0 就绪",
+          "a1 就绪",
+          "空",
+          "空"
+        ],
+        "io": "Post 正在处理 K0",
+        "fn": "保留给 K0 的八个 atom",
+        "mma": "可消费 a0：四路依次累加",
+        "event": "WG1 生产偶数 atom，WG2 生产奇数 atom。A0/A1 是不同槽。"
+      },
+      {
+        "a": [
+          "已释放",
+          "a1 就绪",
+          "a2 就绪",
+          "空"
+        ],
+        "io": "仍不能覆盖 K0 的输入槽",
+        "fn": "K0 仍未消费完",
+        "mma": "a0 完成 → empty_a[0]",
+        "event": "消费 a0 后 A0 可复用；这不释放整个 IO 槽，也不提交整份 accumulator。"
+      },
+      {
+        "a": [
+          "a4 就绪",
+          "a5 就绪",
+          "已释放",
+          "已释放"
+        ],
+        "io": "K0 的剩余 atom 继续处理",
+        "fn": "八个 atom 完成后才释放",
+        "mma": "a0…a3 已消费；继续 a4",
+        "event": "跨过 a1…a3：a4 再用 A0（atom mod 4）；旧 a0 未释放时必须等待。"
+      },
+      {
+        "a": [
+          "已释放",
+          "已释放",
+          "已释放",
+          "已释放"
+        ],
+        "io": "全部 Post 完成 + store wait → empty_io",
+        "fn": "最后 atom 消费 → empty_fn",
+        "mma": "全部 K block 完成 → full_accum",
+        "event": "WG3 读出整份 split partial 后释放 accumulator。Mix 另等全部 S 个 split。"
+      }
+    ],
+    "boundary": "源码支持的先后关系与一种合法状态快照；不是测得的调度、同时执行保证或耗时。"
+  }
+}

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="用一轮五个请求看懂 vLLM 如何借助 kern 执行模型。">
+  <title>一轮请求怎样跑完？· kern × vLLM</title>
+  <link rel="stylesheet" href="kern.css">
+  <link rel="stylesheet" href="reader.css">
+  <!--KERN_DATA-->
+  <script defer src="reader.js"></script>
+  <script defer src="kern.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#overview">跳到正文</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="#overview"><span aria-hidden="true">k</span> kern × vLLM</a>
+    <nav aria-label="章节导航"><a href="#dispatch">请求怎么分组</a><a href="#host">数据怎么交接</a><a href="#manifest">kern 怎么执行</a></nav>
+    <button data-source="all">源码索引 ↗</button>
+  </div>
+</header>
+<main id="overview">
+  <section class="hero" aria-labelledby="lesson-title">
+    <div class="eyebrow">GPU 推理入门 <span>跟着一轮请求读源码</span></div>
+    <h1 id="lesson-title">一轮请求，<br class="mobile-break">怎样跑完？</h1>
+    <p class="hero-intro">有 5 个请求在等模型。有人要继续生成，有人还有一段提示词没处理完。<strong>vLLM 决定这一轮处理哪些 token（文本小片段），kern 负责执行模型计算。</strong> 两者通过插件 <code>kern_vllm</code> 交接。</p>
+    <figure class="role-figure" data-figure="overview" aria-label="三个组件在模型调用中的分工">
+      <ol class="role-flow">
+        <li><small>01 / 决定本轮做什么</small><b>vLLM</b><span>挑出请求，安排本轮的 token</span></li>
+        <li><small>02 / 把活交过去</small><b>kern_vllm</b><span>按请求分组，准备每组的输入</span></li>
+        <li><small>03 / 执行模型计算</small><b>kern</b><span>发起 GPU 操作，把计算结果交回</span></li>
+      </ol>
+      <figcaption class="return-line"><span aria-hidden="true">↶</span><span>结果沿接口回到 vLLM，由它选出需要生成的下一个 token。</span></figcaption>
+    </figure>
+    <div class="hero-actions"><a class="primary-link" href="#dispatch">看这 5 个请求怎么分组 <span aria-hidden="true">↓</span></a><a href="#why-kern">为什么接入？</a><a href="#performance">性能怎样？</a><span class="edition">固定源码 <code id="short-sha"></code></span></div>
+  </section>
+
+  <section class="chapter" id="dispatch">
+    <div class="chapter-heading">
+      <div class="eyebrow">01 / 从请求到调用</div>
+      <h2>5 个请求，为什么调用 3 次？</h2>
+      <p>先数每个请求<strong>本轮要算几个 token</strong>。<code>decode_batch</code> 每个请求只接 1 个，<code>prefill</code> 可以接多个。插件按现有顺序，把相邻的同类请求尽量合成一组，再请 kern 逐组计算。</p>
+    </div>
+    <div class="lab">
+      <div class="lab-toolbar">
+        <div><strong>试着换一种排列</strong><p>点「把 E 移到前面」，比较调用次数。</p></div>
+        <div id="presets" class="preset-buttons" role="group" aria-label="分组预设"></div>
+      </div>
+      <div id="dispatch-result" aria-live="polite" data-figure="dispatch"></div>
+      <details id="custom-dispatch">
+        <summary>输入自己的 token 数，试试容量边界</summary>
+        <div class="details-body">
+          <div id="more-presets" class="preset-buttons" role="group" aria-label="容量预设"></div>
+          <div class="input-row">
+            <label for="query-lengths">按请求顺序填入 token 数
+              <input id="query-lengths" inputmode="text" autocomplete="off" spellcheck="false">
+            </label>
+            <button id="apply-q" class="primary">应用</button>
+            <button id="reset-q">重置</button>
+          </div>
+          <label class="checkbox"><input id="has-prefill" type="checkbox" checked>模型清单提供 prefill</label>
+          <p class="note" id="demo-capacity"></p>
+        </div>
+      </details>
+    </div>
+    <details class="deep-dive">
+      <summary>源码里怎么判断？</summary>
+      <div class="details-body">
+        <p>源码从相邻的 token 起始偏移求出各请求的本轮长度，常记为 <code>q</code>。最长请求只有 1 个 token 时走纯 decode 路径，按容量切组。遇到多 token 请求才走混合路径，按相邻关系和每组容量切分。</p>
+        <p>只含 1 个 token 的新提示词同样走 decode。混合路径遇到缺少 <code>prefill</code> 的清单会抛错，长提示词需要由 KV connector 先提供缓存。示例只展示实际请求，纯 decode 的 CUDA Graph 填充行另行处理。</p>
+        <div class="source-links"><button data-source="dispatch">forward 分支 ↗</button><button data-source="construct">容量检查 ↗</button></div>
+      </div>
+    </details>
+  </section>
+
+  <section class="chapter" id="host">
+    <div class="chapter-heading">
+      <div class="eyebrow">02 / 放大原例中的 C、D</div>
+      <h2>7 个 token 交进去，什么回来？</h2>
+      <p>C 有 4 个 token，D 有 3 个。插件把这 7 个 token 交给 kern 的一次 <code>prefill</code> 调用。两段输入排在一起，各自仍属于原来的请求。</p>
+    </div>
+    <figure class="handoff" data-figure="host">
+      <div class="handoff-main">
+        <div class="flow-node">
+          <small>vLLM 准备</small><b>7 个 token + 配套信息</b>
+          <div class="token-legend"><span>C · 4 个</span><span>D · 3 个</span></div>
+          <p>包括位置和历史缓存页索引。</p>
+        </div>
+        <div class="flow-edge"><span class="flow-arrow" aria-hidden="true"></span><span>插件复制</span></div>
+        <div class="flow-node runtime-node">
+          <small>kern 执行</small><b>一次 prefill</b>
+          <p>计算时读写两个请求各自的缓存和状态。</p>
+        </div>
+        <div class="flow-edge"><span class="flow-arrow" aria-hidden="true"></span><span>插件复制</span></div>
+        <div class="flow-node">
+          <small>vLLM 收回</small><b>7 行 hidden</b>
+          <p>每个输入 token 对应一行模型中间结果。插件写回整轮输出的对应位置。</p>
+        </div>
+      </div>
+      <figcaption>整轮结果收齐后，vLLM 挑出需要生成下一 token 的行，交给 kern 的 <code>head</code> 算候选分数（logits），再由 vLLM 采样。</figcaption>
+    </figure>
+    <div class="state-path">
+      <span class="state-symbol" aria-hidden="true">▤</span>
+      <div><h3>历史缓存留在原处</h3><p>KV 缓存和递归状态是模型留给后续轮次的数据。<strong>vLLM 分配这些内存页，kern 直接用绑定好的地址读写。</strong> 上图两次复制的是本轮的输入和结果。</p></div>
+    </div>
+    <details class="deep-dive" id="binding">
+      <summary>从插件注册到借用缓存地址</summary>
+      <div class="details-body">
+        <p>先告诉 vLLM <strong>需要什么形状的缓存</strong>，等它分配好，再把<strong>真实 GPU 地址</strong>交给 kern。以 Qwen3.8 的一层注意力缓存 <code>kv.l3</code> 为例。</p>
+        <figure data-figure="binding" class="handoff">
+          <ol class="binding-flow">
+            <li><span class="bind-index">1</span><div><b>注册并选中模型类</b><p><code>kern-llm</code> 的插件入口注册 <code>KernForCausalLM</code>。启动时通过模型架构配置选中它。</p></div></li>
+            <li><span class="bind-index">2</span><div><b>插件声明缓存需求</b><p>模型构造时先建立占位层，向 vLLM 提供缓存规格。这些层用于分配和传递元数据，计算由整份 kern program 发起。</p></div></li>
+            <li><span class="bind-index">3</span><div><b>vLLM 分配 GPU 张量</b><p>真实张量到位后，插件用 <code>host_region()</code> 提取地址、元素类型、形状和步幅。步幅表示某一维索引加 1 时，要跨过多少个元素。</p></div></li>
+            <li><span class="bind-index">4</span><div><b>kern 校验并编译</b><p>进入有元数据、缓存已分配的 forward 后，<code>bind_host()</code> 对照清单校验所有宿主状态。成功后借用这些地址，生成带实际地址的 GPU 启动清单。</p></div></li>
+          </ol>
+          <dl class="compare binding-example">
+            <div><dt>清单里的 <code>kv.l3</code></dt><dd><code>bf16 · [0, 4, 64, 512]</code><br>首维 0 留给宿主填写块数，其余维度和步幅固定。</dd></div>
+            <div><dt>vLLM 分配后交给 kern</dt><dd><code>GPU 地址 + bf16 · [B, 4, 64, 512]</code><br>B 是实际块数。步幅必须等于 <code>[131072, 512, 2048, 1]</code>。</dd></div>
+          </dl>
+          <div class="address-map" aria-label="vLLM 分配缓存，kern 通过绑定的地址读写同一份缓存">
+            <span>vLLM 持有</span><i aria-hidden="true">→</i><strong>同一份 GPU 缓存</strong><i aria-hidden="true">←</i><span>kern 读写</span>
+          </div>
+          <figcaption class="note">这个例子展示一层的 KV 视图。绑定时会同时检查其他声明的状态。</figcaption>
+        </figure>
+        <p><strong>为什么要重绑？</strong> vLLM 可能先用小缓存探测 CUDA Graph 占用，再换成正式缓存。插件发现用于检查的缓存张量对象换了，就在捕获前重新绑定。kern 重编译启动清单，并丢弃自身旧的 Graph 实例，避免沿用旧地址。</p>
+        <div class="source-links"><button data-source="register">注册模型类 ↗</button><button data-source="layers">占位层与缓存规格 ↗</button><button data-source="host-region">提取张量地址 ↗</button><button data-source="bind">首次绑定与重绑 ↗</button><button data-source="host-lifecycle">宿主内存契约 ↗</button></div>
+      </div>
+    </details>
+    <details class="deep-dive" id="streams">
+      <summary>看一次交接。两条 GPU 队列怎么互相等？</summary>
+      <div class="details-body">
+        <p>GPU stream 可以理解为一条按顺序排任务的队列。<strong>同一条队列内天然有先后关系，跨队列要显式接上。</strong> 下面按四步追踪 C、D 的输入和输出，箭头从记录事件的一方指向等待的一方。</p>
+        <div id="stream-figure" data-figure="streams"></div>
+        <figure class="handoff reuse-figure" data-figure="reuse">
+          <figcaption><strong>接着轮到 E。为什么可以用同一块临时缓冲区？</strong></figcaption>
+          <ol class="reuse-flow">
+            <li><b>先跑完 C、D</b><span>kern 写出 7 行 hidden，记录 <code>after</code>。</span></li>
+            <li><b>再把 7 行搬走</b><span>vLLM 队列等到事件，把 7 行复制到 <code>out[2:9]</code>。</span></li>
+            <li><b>再接 E</b><span>同一 vLLM 队列写入 E 的输入，再发 E 的 <code>before</code>。kern 随后复用临时缓冲，最后写回 <code>out[9:10]</code>。</span></li>
+          </ol>
+        </figure>
+        <p><code>cuStreamWaitEvent</code> 把等待排到 GPU 队列里，CPU 可以继续提交后面的操作。图展示依赖，实际耗时由测量确定。</p>
+        <p>示例的混合轮次直接提交 GPU 操作（eager）。在上游 <code>FULL_DECODE_ONLY</code> 配置中，符合条件的纯 decode 可以捕获成 CUDA Graph。事件把 kern 队列接进同一次捕获，再接回 vLLM 队列。绑定和初始化需要在捕获前完成。</p>
+        <div class="source-links"><button data-source="events">记录与等待事件 ↗</button><button data-source="copy">两组如何复用缓冲 ↗</button><button data-source="host-graph">纯 decode 的 Graph 捕获 ↗</button><a href="https://docs.nvidia.com/cuda/archive/13.0.0/cuda-driver-api/group__CUDA__STREAM.html">CUDA Stream API ↗</a></div>
+      </div>
+    </details>
+  </section>
+
+  <section class="chapter" id="manifest">
+    <div class="chapter-heading">
+      <div class="eyebrow">03 / 从清单到 GPU</div>
+      <h2>kern 怎么知道 prefill 要做什么？</h2>
+      <p>模型包里的 <strong>manifest</strong> 是一份可执行清单。它写明每一步调用哪些 GPU 操作、从哪里读数据、结果写到哪里。kern 读取这份清单，把代码和权重接起来。</p>
+    </div>
+    <figure class="recipe" data-figure="manifest">
+      <div class="recipe-inputs">
+        <div><small>做什么、按什么顺序</small><b>执行清单</b><code>manifest.json</code></div>
+        <div><small>每项 GPU 操作的实现</small><b>设备代码</b><code>kernel modules</code></div>
+        <div><small>模型运算使用的参数</small><b>模型权重</b><code>checkpoint</code></div>
+      </div>
+      <div class="recipe-arrow" aria-hidden="true">↓</div>
+      <div class="recipe-output"><b>kern 执行器</b><span>绑定数据地址，按清单发起 GPU 工作</span></div>
+    </figure>
+    <details class="deep-dive">
+      <summary>拆开一个真实的操作，看清单怎么写</summary>
+      <div class="details-body">
+        <p>上游 README 的 <code>decode</code> 示例从词嵌入开始。先给出 token 编号，再去权重表里查对应的向量，写到 <code>hidden</code>。顺着这次查表，可以读懂四层名字。</p>
+        <ol class="term-list">
+          <li><code>program</code><span>整份步骤清单。<code>decode</code> 里有多次操作调用。</span></li>
+          <li><code>call</code><span>清单里的一次具体调用。把 <code>token_ids</code>、权重表 <code>embed</code> 和输出缓冲 <code>hidden</code> 交给词嵌入操作。</span></li>
+          <li><code>op</code><span>操作的接口与实现。这里的 <code>embedding</code> 定义它接收什么参数以及怎样执行。</span></li>
+          <li><code>launch</code><span>一次设备代码的启动描述。此处指定了 <code>kern_embedding_i64_bf16</code>。</span></li>
+        </ol>
+        <p>一次 program 调用可以展开成多次 GPU 启动。分组实验计的是 program 调用。</p>
+        <div class="source-links"><button data-source="package">查看上游示例 ↗</button><button data-source="verify">清单校验能检查什么 ↗</button></div>
+      </div>
+    </details>
+    <details class="deep-dive">
+      <summary>kern 单独运行时，和挂到 vLLM 里有什么区别？</summary>
+      <div class="details-body">
+        <dl class="compare">
+          <div><dt>独立运行 <code>kern run</code></dt><dd>对自有状态的清单，加载时分配状态和编译。CLI 自己准备输入，驱动生成循环。</dd></div>
+          <div><dt>挂到 vLLM <code>kern_vllm</code></dt><dd>先分配 kern 自己的缓冲。等 vLLM 提供缓存地址后，再绑定和编译。vLLM 驱动调度与采样。</dd></div>
+        </dl>
+        <div class="source-links"><button data-source="hosts">项目和工具 ↗</button><button data-source="load">加载时机 ↗</button><button data-source="standalone">独立运行入口 ↗</button></div>
+      </div>
+    </details>
+  </section>
+
+  <section class="chapter" id="why-kern">
+    <div class="chapter-heading">
+      <div class="eyebrow">04 / 设计动机</div>
+      <h2>为什么单独做一个 kern？</h2>
+      <p>假设只想优化一种模型在一类 GPU 上的 decode。通用推理引擎要兼顾许多模型、精度和 GPU，专用改动也要放进这套共享实现里。kern 把 kernel 选择和计算组合放进<strong>这个模型自己的执行包</strong>，由通用的 kern 运行时读取和执行。</p>
+    </div>
+    <dl class="compare">
+      <div><dt>改动范围清楚</dt><dd>在 manifest 中定位某个操作，替换它引用的设备代码，或改变融合和并行切分。上游 README 用 <code>silu_mul</code> 演示替换 kernel 引用。</dd></div>
+      <div><dt>可以独立验证和测量</dt><dd><code>kern test</code> 用参考实现核对候选结果，<code>kern bench</code> 在指定形状上测时间。清单的布局和参数校验能提前发现一部分接线错误。</dd></div>
+    </dl>
+    <div class="source-links"><button data-source="motivation">上游设计动机 ↗</button><button data-source="kernel-swap">替换示例 ↗</button><button data-source="hosts">验证与测量工具 ↗</button></div>
+    <h3 class="subquestion">为什么还要接入 vLLM？</h3>
+    <p>前面的五个请求由服务层排成一轮。真实服务还要管理缓存、采样和提供 API。插件让 vLLM 继续负责这些工作，同时把测试过的模型计算交给 kern。这样团队可以用线上出现的请求形状，决定下一轮该优化哪里。</p>
+    <figure class="handoff" data-figure="serve-loop">
+      <ol class="reuse-flow">
+        <li><b>离线改清单</b><span>换 kernel 或改计算组合，用参考结果做校验。</span></li>
+        <li><b>接到 vLLM 服务里</b><span>用适配后的清单跑实际的长短请求、缓存和混合分组。</span></li>
+        <li><b>用实际形状再测</b><span>记录每轮的输入形状，核对分组后再建基准，指导下一次修改。</span></li>
+      </ol>
+    </figure>
+    <p>接入仍需要为模型准备符合插件约定的 manifest 和缓存布局。适配工作量与收益都要按模型和负载评估。</p>
+    <div class="source-links"><button data-source="serve-loop">上游接入与优化流程 ↗</button><a href="#performance">看接入后的实测 ↓</a></div>
+  </section>
+
+  <section class="chapter" id="performance">
+    <div class="chapter-heading">
+      <div class="eyebrow">05 / 上游实测</div>
+      <h2>接入 vLLM 后，性能怎么样？</h2>
+      <p>在 Qwen3.8-27B 的上游测试里，早期版本高并发吞吐落后。优化版在 AgentX 回放中吞吐更高，但尾延迟也更高。三组实验各自有对照，结果均为上游报告。</p>
+      <p class="note">首 token 延迟看多久收到第一个 token，token 间隔看生成过程中相邻 token 等多久。p50 是中位数，p99 是约 99% 样本不超过的值。</p>
+    </div>
+    <div id="reported" data-figure="performance"></div>
+  </section>
+
+  <section class="chapter further" id="reading">
+    <div class="chapter-heading">
+      <div class="eyebrow">继续读 / 可按需展开</div>
+      <h2>缓存布局、测量方法和启动命令</h2>
+    </div>
+    <details class="deep-dive" id="layout">
+      <summary>Qwen3.8 的缓存页为什么按 832 个 token 管理？</summary>
+      <div class="details-body">
+        <p>Qwen3.8-27B 的适配版本让两类模型层使用相同大小的管理页。attention 层按小块存放 KV，GDN 层则需要放下一份递归状态。用后者的大小决定前者需要凑几个完整小块。</p>
+        <figure class="layout-figure" data-figure="layout">
+          <p id="layout-formula"></p>
+          <div class="page-blocks" id="page-blocks"></div>
+          <figcaption id="layout-result"></figcaption>
+        </figure>
+        <details>
+          <summary>核对字节数和步幅</summary>
+          <div class="details-body">
+            <p>attention 每个 token 占 4 个 KV heads × 2（K、V）× 256 × 2 B = 4,096 B。64 个 token 占 262,144 B。</p>
+            <p>GDN 状态占 3 × 10,240 × 2 B + 48 × 128 × 128 × 4 B = 3,207,168 B，页容量比状态多 200,704 B。两类层各用自己的页。</p>
+            <p>KV 视图 <code>[B,4,64,512]</code> 的步幅以 bf16 元素计，为 <code>[131072,512,2048,1]</code>。GDN 视图 <code>[B,3207168]</code> 的步幅以 u8 元素计，为 <code>[3407872,1]</code>。这些数字描述存储容量与布局。</p>
+          </div>
+        </details>
+        <div class="source-links"><button data-source="layout">布局生成器 ↗</button><button data-source="admit">步幅校验 ↗</button></div>
+      </div>
+    </details>
+    <details class="deep-dive" id="evidence">
+      <summary>调用合并之后，怎么验证服务更快？</summary>
+      <div class="details-body">
+        <p>先确认测试跑的是同一组调用。固定版本里的离线转换会把所有单 token 请求并到一起，并把多 token 请求逐条输出。原例里两边恰好都是 3 次，喂给 GPU 的组却不同。</p>
+        <dl class="compare">
+          <div><dt>在线实际分组</dt><dd>A+B → C+D → E</dd></div>
+          <div><dt>离线脚本转换</dt><dd>A+B+E → C → D</dd></div>
+        </dl>
+        <p>比较逐条 prefill 和合组 prefill 时，用同一 GPU、输入、模型版本和 Graph 配置。先对比输出，再重复测量 GPU 时间和服务时延。<code>KERN_TRACE</code> 的时间戳来自元数据构建，GPU 计时需要单独采集。</p>
+        <div class="source-links"><button data-source="workload">离线转换 ↗</button><button data-source="trace">trace 记录什么 ↗</button></div>
+        <p><a href="#performance">回看上游实测与实验条件 ↑</a></p>
+      </div>
+    </details>
+    <details class="deep-dive">
+      <summary>插件怎么启动？</summary>
+      <div class="details-body">
+        <p>这是固定源码里的上游示例。它使用 Linux、Python ≥3.10、支持 CUDA 13 的 NVIDIA 驱动和 cuBLAS 13，并依赖相应的 vLLM 接口。</p>
+        <pre id="launch-command" tabindex="0" aria-label="上游启动命令，可横向滚动"></pre>
+        <div class="source-links"><button data-source="wheel">包和启动示例 ↗</button><button data-source="limits">vLLM 接口版本 ↗</button></div>
+      </div>
+    </details>
+  </section>
+</main>
+<footer><div><b>kern × vLLM</b><p>本页以 <a id="runtime-link">pegainfer-project/kern</a> 的源码快照为依据。<a id="language-link">同名的 Kern 编程语言</a>是另一个项目。</p></div><button data-source="all">源码与许可 ↗</button></footer>
+<dialog id="source-dialog" aria-labelledby="source-title">
+  <div class="dialog-top"><h2 id="source-title">源码与版本</h2><button id="close-source" aria-label="关闭源码">×</button></div>
+  <div id="source-content"></div>
+</dialog>
+<noscript>请启用 JavaScript 使用分组实验、步进图和源码摘录。</noscript>
+</body>
+</html>

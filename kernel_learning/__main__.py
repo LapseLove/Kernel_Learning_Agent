@@ -7,6 +7,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .core import PROJECT, CASE_FILE, dispatch, load_case, validate
 from .cost_model import model
+from . import mhc
 
 class CaseHandler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
@@ -15,6 +16,10 @@ class CaseHandler(SimpleHTTPRequestHandler):
         p = unquote(urlsplit(path).path)
         if p == '/case.json':
             return str(CASE_FILE)
+        if p == '/mhc-case.json':
+            return str(mhc.CASE_FILE)
+        if p == '/mhc-pinned-sources.json':
+            return str(mhc.PINNED_FILE)
         return super().translate_path(path)
 
 def do_import(case, vid, repo_root: Path, allow_mismatch: bool):
@@ -69,6 +74,7 @@ def render_html(case, include_local_sources: bool = False) -> str:
         '<script>window.__KLA_CASE__='+safe_json(case)+';window.__KLA_LOCAL__='+safe_json(local)+
         ';window.__KLA_PINNED__='+safe_json(pinned)+'</script>\n<script>'+anatomy_js+'</script>')
     page=page.replace('<script defer src="/app.js"></script>','<script>'+js+'</script>')
+    page=page.replace('href="/mhc.html"', 'href="MHC_Learning_Studio.html"')
     return page
 
 def export_html(case, target: Path, include_local_sources: bool = False):
@@ -97,6 +103,11 @@ def main():
     ex.add_argument('--include-local-sources',action='store_true',help='Explicitly embed imported local source excerpts; review before sharing')
     build_parser=sub.add_parser('build',help='Regenerate the local standalone HTML entry point')
     build_parser.add_argument('--check',action='store_true')
+    sub.add_parser('validate-mhc',help='Validate the second case and its source map')
+    mhc_build=sub.add_parser('build-mhc',help='Build the portable Mega mHC lesson')
+    mhc_build.add_argument('--check',action='store_true')
+    mhc_import=sub.add_parser('import-mhc-source',help='Import verbatim excerpts from pinned DeepGEMM checkout')
+    mhc_import.add_argument('--root',type=Path,required=True)
     imp=sub.add_parser('import-source');imp.add_argument('--repo',choices=('vllm','sglang'),required=True)
     imp.add_argument('--root',required=True,type=Path);imp.add_argument('--allow-mismatch',action='store_true')
     d=sub.add_parser('dispatch');d.add_argument('--repo',choices=('vllm','sglang'),default='vllm');d.add_argument('--tokens',type=int,default=1)
@@ -129,5 +140,22 @@ def main():
         print(json.dumps(dispatch(args.repo,args.tokens,args.swa,args.extra,args.heads,args.phase),ensure_ascii=False,indent=2))
     elif args.command=='cost':
         print(json.dumps(model(args.repo,args.tokens,args.swa,args.extra,args.heads),ensure_ascii=False,indent=2))
+    elif args.command=='validate-mhc':
+        problems=mhc.validate(mhc.load_case())
+        if problems:
+            print('\n'.join(problems));raise SystemExit(1)
+        print('OK: Mega mHC case and source map')
+    elif args.command=='build-mhc':
+        try:
+            target=mhc.build(mhc.load_case(),args.check)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        print(f'OK: {target}')
+    elif args.command=='import-mhc-source':
+        try:
+            target=mhc.import_source(mhc.load_case(),args.root)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        print(f'OK: {target}')
 
 if __name__=='__main__':main()

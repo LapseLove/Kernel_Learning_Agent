@@ -5,7 +5,18 @@ __pycache__/
 .DS_Store
 web/local-sources.json
 Kernel_Learning_Studio.html
+MHC_Learning_Studio.html
+/Kern_Runtime_Studio.html
+/Model_PR_History.html
+/KernelWiki.html
 *.zip
 dist/
 playwright-report/
 test-results/
+
+# Local research and review material
+/.research/
+/cases/*/reviews/
+/docs/BBuf-model-pr-history-*.md
+/docs/assets/studio-overview.png
+/references/*.canvas

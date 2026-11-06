@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KernelWiki · 从检索走到证据</title>
+<meta name="description" content="用 FlashAttention-4 走一遍 KernelWiki 的查询、证据追踪与维护流程。">
+<style>
+:root{color-scheme:light;--paper:#faf6ee;--ink:#25251f;--muted:#5d5b50;--line:#d8cfc0;--accent:#92402d;--accent-wash:#f3e4da;--light:#fffdf8;--dark:#2d3029;--mono:Consolas,"Cascadia Mono",monospace;--serif:Georgia,"Noto Serif CJK SC","Songti SC",SimSun,serif}
+*{box-sizing:border-box}
+html{scroll-padding-top:20px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 system-ui,"Microsoft YaHei",sans-serif}
+a{color:var(--accent);text-underline-offset:.2em}
+a:hover{text-decoration-thickness:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+code,pre,.eyebrow,.num,.hash{font-family:var(--mono)}
+code,.hash{overflow-wrap:anywhere}
+p{max-width:69ch;margin:.65rem 0 1rem}
+.wrap{width:min(1100px,calc(100% - 64px));margin:auto}
+.top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:19px 0;border-bottom:1px solid var(--line);font-size:.82rem}
+.top strong{letter-spacing:.04em}
+.top a{color:var(--muted);text-decoration:none}
+.hero{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:end;gap:56px;padding:70px 0 54px}
+.eyebrow{font-size:.76rem;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);font-weight:700}
+h1,h2{font-family:var(--serif);line-height:1.1;letter-spacing:-.025em}
+h1{font-size:clamp(4rem,10vw,9rem);margin:.22em 0 .12em;font-weight:400}
+.hero h2{font:650 clamp(1.45rem,3vw,2.3rem)/1.35 system-ui,sans-serif;margin:0}
+.hero p{color:var(--muted);max-width:33em;margin:0 0 .5rem}
+nav{display:flex;flex-wrap:wrap;gap:10px 28px;border-block:1px solid var(--line);padding:15px 0}
+nav a{font-size:.9rem;color:var(--ink);text-decoration:none}
+nav a span{color:var(--accent);font: .78rem var(--mono);margin-right:.5rem}
+.chapter{padding:60px 0 66px;border-bottom:1px solid var(--line)}
+.chapter header{margin-bottom:24px}
+.chapter h2{font-size:clamp(1.8rem,4vw,3rem);margin:.38rem 0 .65rem}
+.chapter h3{line-height:1.35;margin:0 0 .4rem;font-size:1.06rem}
+.muted,.refs{color:var(--muted)}
+.refs{font-size:.85rem;margin:15px 0 0}
+.refs a{display:inline-block;max-width:100%;overflow-wrap:anywhere}
+.flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0;margin:25px 0 16px;list-style:none;border-block:1px solid var(--line)}
+.flow li{position:relative;padding:20px 28px 16px 20px;min-width:0}
+.flow li+li{border-left:1px solid var(--line)}
+.flow li+li::before{content:"→";position:absolute;left:0;top:24px;transform:translateX(-50%);background:var(--paper);color:var(--accent);padding:0 4px;font-weight:700}
+.flow p{font-size:.92rem;margin:0;color:var(--muted)}
+.flow .eyebrow{display:block;margin-bottom:8px;letter-spacing:.08em}
+.figure-note{max-width:none;font-size:.9rem;margin-top:12px}
+.lab{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);border:1px solid var(--line);background:var(--light);border-radius:12px;overflow:hidden}
+.lab-controls{padding:23px;background:var(--dark);color:#f9f2e6;min-width:0}
+.lab-controls .eyebrow{color:#efbd9b}
+.choice{display:flex;gap:8px;margin:12px 0}
+.choice button{font:700 .94rem var(--mono);border:1px solid #9f9e91;border-radius:5px;background:transparent;color:#fff;cursor:pointer;padding:9px 15px}
+.choice button[aria-pressed=true]{background:#f7e0cf;color:#3f271e;border-color:#f7e0cf}
+.choice button:focus-visible{outline-color:#f7e0cf}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.86rem;line-height:1.55;background:#eee7db;border-radius:5px;padding:13px;margin:.6rem 0}
+.lab-controls pre{background:#1f221d;color:#fdf5e7}
+.lab-controls p{font-size:.86rem;color:#e1dace}
+.lab-results{padding:23px;min-width:0}
+.lab-results ol{list-style:none;counter-reset:result;padding:0;margin:.5rem 0}
+.lab-results li{counter-increment:result;display:grid;grid-template-columns:1.5rem minmax(0,1fr);align-items:start;border-bottom:1px solid var(--line);gap:8px;padding:7px 5px}
+.lab-results li::before{content:counter(result,decimal-leading-zero);font:.75rem/2 var(--mono);color:var(--muted)}
+.lab-results li.match{background:var(--accent-wash)}
+.lab-results li a{overflow-wrap:anywhere}
+.lab-results p{font-size:.88rem;margin-bottom:0}
+details{border-block-end:1px solid var(--line);padding:.8rem 0}
+summary{cursor:pointer;font-weight:650}
+.evidence{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:30px;margin:23px 0}
+.evidence dl{border-left:3px solid var(--accent);margin:0;background:var(--light);padding:16px 20px}
+dt{color:var(--muted);font-size:.84rem}dd{margin:0 0 9px;font-weight:650}dd:last-child{margin:0}
+.trace{margin:0;padding:0;list-style:none}
+.trace li{padding:8px 0 11px;border-top:1px solid var(--line);font-size:.93rem}
+.trace small{display:block;color:var(--muted)}
+.steps{margin:1rem 0;padding:0;list-style:none;counter-reset:step}
+.steps li{counter-increment:step;display:grid;grid-template-columns:2rem minmax(0,1fr);gap:12px;border-top:1px solid var(--line);padding:13px 0}
+.steps li::before{content:counter(step,decimal-leading-zero);font:.82rem/2 var(--mono);color:var(--accent)}
+.steps p{margin:0;font-size:.92rem}
+.role-list{margin:18px 0 0}
+.role-list>div{display:grid;grid-template-columns:12rem minmax(0,1fr);gap:16px;padding:14px 0;border-top:1px solid var(--line)}
+.role-list dt{font-weight:720;color:var(--ink);font-size:1rem}
+.role-list dd{font-weight:400;margin:0;max-width:67ch}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px;margin:24px 0}
+.pair article{border-top:2px solid var(--accent);padding:16px 0 0}
+.pair p{font-size:.94rem}
+.takeaway{border-left:3px solid var(--accent);padding:12px 16px;background:var(--light);margin:19px 0;max-width:75ch}
+.takeaway p{margin:0}
+footer{padding:28px 0 40px;color:var(--muted);font-size:.86rem}
+@media(max-width:700px){
+ .wrap{width:calc(100% - 34px)}.top{font-size:.71rem}.hero{grid-template-columns:1fr;gap:22px;padding:42px 0 34px}h1{font-size:clamp(3rem,13vw,5.5rem)}
+ nav{gap:6px 18px}.chapter{padding:39px 0}.flow,.lab,.evidence,.role-list>div,.pair{grid-template-columns:1fr}.role-list>div{gap:4px}.pair{gap:18px}.flow li+li{border-left:0;border-top:1px solid var(--line)}
+ .flow li+li::before{content:"↓";left:22px;top:0;transform:translateY(-55%)}.evidence{gap:18px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><strong>TECHNICAL LEARNING STUDIO</strong><a href="{{overview}}">固定快照 <span class="hash">{{short_commit}}</span> ↗</a></div>
+<header class="hero">
+  <div><div class="eyebrow">Project walkthrough / Knowledge systems</div><h1>KernelWiki</h1><h2>从检索走到证据</h2></div>
+  <p>当你问「B200 上有什么 FlashAttention-4 的实现证据」，KernelWiki 怎样找到候选？又有哪些判断仍要你自己做？</p>
+</header>
+<nav aria-label="本页章节">
+  <a href="#system"><span>01</span>它解决什么</a><a href="#roles"><span>02</span>谁在做什么</a><a href="#query"><span>03</span>跑一次查询</a>
+  <a href="#evidence"><span>04</span>读懂证据</a><a href="#maintain"><span>05</span>知识怎么更新</a><a href="#compare"><span>06</span>对照另一套系统</a>
+</nav>
+<main>
+<section class="chapter" id="system">
+<header><div class="eyebrow">01 / System</div><h2>让优化经验能查、能追溯</h2>
+<p>KernelWiki 是面向 Blackwell 和 Hopper 的 GPU kernel 优化知识库，仓库根目录的 <code>SKILL.md</code> 也是 Claude Code 的使用入口。工程师和 Agent 可以先找技术线索，再沿页面 ID 回查 PR、论文、作者文章或实现。</p></header>
+<ol class="flow" aria-label="资料、综合页与派生索引的关系">
+  <li><span class="eyebrow">Source</span><h3><code>sources/</code> 收录材料</h3><p>每篇 PR、文档或文章有独立记录。原样保存的 patch 或代码另放在 <code>artifacts/</code>。</p></li>
+  <li><span class="eyebrow">Synthesis</span><h3><code>wiki/</code> 解释机制</h3><p>把多条材料组织成技术或 kernel 页面，用 YAML 元数据记录架构、来源和证据状态。</p></li>
+  <li><span class="eyebrow">Navigation</span><h3><code>queries/</code> 派生索引</h3><p>生成器读取资料页与综合页的元数据，产出架构、问题、技术等导航。索引也可以直接读。</p></li>
+</ol>
+<p class="figure-note">论文和 PR 往往从不同角度描述同一个机制。综合页把它们连起来，并保留各自出处。命令行的 <code>query.py</code> 直接扫描 <code>wiki/</code> 和 <code>sources/</code>；<code>queries/</code> 提供按主题浏览的入口。</p>
+<p class="refs"><a href="{{architecture}}">仓库分层与维护工具 ↗</a> · <a href="{{skill}}">Skill 查询入口 ↗</a> · <a href="{{ranking}}">命令行入口 ↗</a></p>
+</section>
+
+<section class="chapter" id="roles">
+<header><div class="eyebrow">02 / Ownership</div><h2>谁读、谁判断、谁写文件？</h2>
+<p>用同一个 FA4 问题看一次交接。这里区分回答用户时的产出，以及维护仓库时写入的文件。</p></header>
+<dl class="role-list">
+  <div><dt>供 Agent 使用</dt><dd><code>SKILL.md</code> 告诉 Agent 何时用库、该选哪个工具、回答要带哪些证据。综合页、来源、索引和归档是它读取的材料，人也可以直接查看。</dd></div>
+  <div><dt>查询脚本产出</dt><dd><code>query.py</code> 打印按规则排好的候选；<code>get_page.py</code> 按 ID 或路径取页，再按选项显示所引资料的片段。一次查询只读取本地库。</dd></div>
+  <div><dt>Agent 的产出</dt><dd>把问题转成查询参数，挑值得读的候选，核对架构、证据级别和来源，最后写出带引用的解释、适用边界和下一步验证。例如在 FA4 的回答里把 SM100 归类、上游实现和待确认的当前框架派发分开写。</dd></div>
+  <div><dt>维护阶段写入</dt><dd>脚本生成候选记录、部分 PR 来源页和导航索引。<code>wiki/</code> 的机制综合与证据取舍属于编辑工作，维护者可以让 Agent 起草或修订并审查。现有页面的具体作者归属要查其提交记录。</dd></div>
+</dl>
+<p class="refs"><a href="{{skill}}">Skill 查询约定 ↗</a> · <a href="{{output}}">Agent 回答与维护约定 ↗</a></p>
+</section>
+
+<section class="chapter" id="query">
+<header><div class="eyebrow">03 / Query</div><h2>只换目标 GPU，候选怎么变？</h2>
+<p>Agent 把自然语言问题化成关键词、页面类型和目标架构。先预测换成 H100 之后，FA4 会留下、下移还是消失，再切换。</p></header>
+<div class="lab">
+  <div class="lab-controls">
+    <div class="eyebrow">目标 GPU</div>
+    <div class="choice" role="group" aria-label="选择目标 GPU">
+      <button type="button" data-gpu="B200" aria-pressed="true">B200</button><button type="button" data-gpu="H100" aria-pressed="false">H100</button>
+    </div>
+    <pre id="command"></pre>
+    <p>固定版本的命令输出回放。浏览器切换时只显示对应结果。</p>
+  </div>
+  <div class="lab-results" aria-live="polite">
+    <div class="eyebrow" id="result-title"></div>
+    <ol id="matches"></ol>
+    <p id="result-note"></p>
+  </div>
+</div>
+<details>
+<summary>打开查询脚本，看看 DeepGEMM 的 8 分从哪来</summary>
+<ol class="steps">
+  <li><div><h3>扫描本地页，先过滤</h3><p>逐页读取 <code>sources/</code> 与 <code>wiki/</code> 的 YAML 和正文，应用 <code>--type kernel</code> 与架构条件。H100 映射到 <code>sm90</code>，仅标 <code>sm100</code> 的 FA4 在计分前就被排除。</p></div></li>
+  <li><div><h3>按空白拆词，再计分</h3><p><code>"flash attention 4"</code> 拆成三个词。每个词可以扩展别名，分别算标题包含加 10 分、标签字段包含加 5 分、正文出现每次加 1 分且最多 3 分。每个词取原词与别名中的最高分，然后相加。</p></div></li>
+  <li><div><h3>保留正分，排序并输出</h3><p>先按总分降序，同分按路径排序，截取前四条。实算 FA4 为 18 + 18 + 13 = 49。DeepGEMM 为 0 + 0 + 8 = 8，其中 <code>fp4</code> 标签给数字 <code>4</code> 加 5 分，正文再加 3 分。8 分能解释命中，却无法回答 FA4 的问题。</p></div></li>
+</ol>
+<p class="refs"><a href="{{scan}}">读取页面 ↗</a> · <a href="{{scoring}}">关键词评分 ↗</a> · <a href="{{deepgemm}}">DeepGEMM 标签 ↗</a> · <a href="{{gpu}}">GPU 到架构的映射 ↗</a> · <a href="{{policy}}">架构过滤规则 ↗</a></p>
+</details>
+</section>
+
+<section class="chapter" id="evidence">
+<header><div class="eyebrow">04 / Evidence</div><h2>从 FA4 页面追到原始材料</h2>
+<p>B200 的首条候选提供页面 ID。用它打开综合页，并沿 <code>sources</code> 展开所引用的资料页。</p></header>
+<pre>python scripts/get_page.py kernel-flash-attention-4 --follow-sources</pre>
+<div class="evidence">
+  <dl aria-label="FA4 页面关键元数据">
+    <dt>在哪个架构下讨论</dt><dd><code>architectures: [sm100]</code></dd>
+    <dt>本页结论从哪来</dt><dd><code>confidence: source-reported</code></dd>
+    <dt>提供哪一级复现材料</dt><dd><code>reproducibility: snippet</code></dd>
+  </dl>
+  <ol class="trace" aria-label="依次查阅的证据">
+    <li><a href="{{fa4}}">综合页 · <code>kernel-flash-attention-4</code></a><small>先读架构、证据级别和资料 ID。</small></li>
+    <li><a href="{{paper}}">资料页 · 论文与固定实现</a> · <a href="{{blog}}">作者博客记录</a><small>沿 <code>sources</code> 追两条材料。CLI 输出的是摘要片段；查关键主张时打开完整文件。</small></li>
+    <li><a href="https://github.com/Dao-AILab/flash-attention/tree/0251105a2fb19d2957484b7f023cd8c115286ced/flash_attn/cute">上游 · 固定版本的 CuTe 实现</a><small>查实际代码和安装条件；用目标输入另做正确性及性能验证。</small></li>
+  </ol>
+</div>
+<p><strong>读者可以确认什么？</strong> 这版 Wiki 将 FA4 归入 SM100，提供了指向作者材料与固定实现的证据。页内 API 调用只是片段。框架实际派发要查对应版本的 caller，性能要在自己的 GPU、形状和基线上测。</p>
+<p class="refs"><a href="{{lookup}}">按 ID 取页与展开来源 ↗</a> · <a href="{{schema}}">证据与复现级别 ↗</a> · <a href="{{boundary}}">FA4 页的复现边界 ↗</a></p>
+</section>
+
+<section class="chapter" id="maintain">
+<header><div class="eyebrow">05 / Maintenance</div><h2>新 PR 怎样进入知识库？</h2>
+<p>下面以 PR 来源为例。FA4 查询所追的论文与作者博客也属于 <code>sources/</code>，各有自己的来源记录。</p></header>
+<ol class="steps">
+  <li><div><h3>刷新候选账本</h3><p><code>refresh_candidate_ledger.py</code> 从 GitHub 搜索候选并补取 PR 及文件证据。已有编号跳过；新编号由范围规则给 include 或 exclude，取不到证据时记 defer，再写入 <code>candidates/</code>。<a href="{{refresh}}">刷新规则 ↗</a> · <a href="{{ledger}}">账本约定 ↗</a></p></div></li>
+  <li><div><h3>从纳入项生成来源页</h3><p><code>generate-pr-pages.py</code> 读取尚未生成的 include 条目，经 <code>gh api</code> 取 PR 和文件列表，再核查范围。通过后按模板写入 <code>sources/prs/</code>。独立的 <code>artifacts/</code> 可保存原样 patch 或文件，并用 <code>PROVENANCE.yaml</code> 记录出处。<a href="{{generate}}">生成逻辑 ↗</a> · <a href="{{artifact}}">归档样例 ↗</a></p></div></li>
+  <li><div><h3>编辑综合页</h3><p>维护者按问题挑选来源，解释机制、适用边界和证据强度，再把来源 ID 写进 <code>wiki/</code>。Agent 可以协助起草和核对。PR 生成器的输出到来源层为止。</p></div></li>
+  <li><div><h3>从元数据重建导航、跑验证</h3><p><code>generate-indices.py</code> 读取两层 Markdown 的 YAML frontmatter，按架构、问题、技术等分组，写出 <code>queries/</code> 下七份索引。验证器另外检查来源 ID 和 <code>verified</code> 的证据字段。<a href="{{index_input}}">读取索引输入 ↗</a> · <a href="{{indices}}">索引输出 ↗</a> · <a href="{{verify}}">验证规则 ↗</a></p></div></li>
+</ol>
+<details><summary>把这套结构迁移到自己的团队，先做哪一块？</summary>
+<p>先选一类团队反复查询的问题，给来源和综合页分配稳定 ID。用一条真实查询验证：能找到候选、能看懂适用边界、能沿 ID 找回原文。再按需求增加索引、审查规则和归档。</p>
+<p class="refs"><a href="{{output}}">KernelWiki 的输出约定 ↗</a></p></details>
+</section>
+<section class="chapter" id="compare">
+<header><div class="eyebrow">06 / Comparison</div><h2>两套系统怎样分工？</h2>
+<p>KernelWiki 让读者从机制或硬件条件找知识页。BBuf 的 Model PR history 让读者从框架和模型族找变更历史。差异可以从查询返回的第一种对象看出来。</p></header>
+<div class="pair">
+  <article><h3>KernelWiki · 找页面和来源</h3>
+  <p><strong>查询。</strong> 扫描带 frontmatter 的单页，经架构、类型过滤与词项评分后返回页面 ID、路径和标题。Agent 再跟 <code>sources</code> 核实结论。</p>
+  <p><strong>构建。</strong> GitHub PR 候选 → 规则账本 → 纳入项的来源页。综合页由编辑工作组织；独立脚本读取两层元数据，生成按主题浏览的索引。</p>
+  <p class="refs"><a href="{{ranking}}">查询入口 ↗</a> · <a href="{{generate}}">PR 来源页生成 ↗</a> · <a href="{{indices}}">索引生成 ↗</a></p></article>
+  <article><h3>Model PR history · 找档案和命中行</h3>
+  <p><strong>查询。</strong> 先按框架、模型和语言挑本地档案，再按词频和模型名等信号给文档计分；从每份档案按原顺序打印最多六条匹配行，任一词命中即可。Agent 打开整份档案、PR diff 和当前 caller，写出带风险和验证条件的判断。</p>
+  <p><strong>构建。</strong> <code>git ls-files</code> 选模型文件 → <code>git log --name-only</code> 从提交标题提取 PR 号 → 标题与路径提示过滤 → 合并旧档案中的 PR 号。生成器复用符合条件的旧卡片，经 <code>gh api</code> 补取需要的 PR 元数据与变更文件，再输出中英文档案。<code>--dry-run</code> 给候选和复用统计，在抓取与写入前结束。</p>
+  <p class="refs"><a href="{{bbuf_skill}}">给 Agent 的指令 ↗</a> · <a href="{{bbuf_query}}">档案查询 ↗</a> · <a href="{{bbuf_trace}}">Git 追溯 ↗</a> · <a href="{{bbuf_rebuild}}">重建主流程 ↗</a></p></article>
+</div>
+<div class="takeaway"><p><strong>试读一个反例。</strong> 在 Model PR history 搜 SGLang / qwen3-core / 中文的 <code>fused qk norm</code>，首条是 #7723 的 FusedMoE 相关记录，因为 <code>fusedmoe</code> 包含 <code>fused</code>。这个命中行和 KernelWiki 里的 DeepGEMM 都是脚本给出的线索，是否回答原问题由 Agent 核对原文后判断。<a href="{{bbuf_example}}">实跑命中的档案位置 ↗</a></p></div>
+</section>
+</main>
+<footer>
+  <p>这份教学 HTML 由本项目的构建脚本把讲解模板、固定出处和实跑查询样本打包在一起。读者点击 GPU 按钮时，浏览器显示样本中对应的一组结果。</p>
+  <p>快照 <code class="hash">{{commit}}</code>。上游声明的 PR 审计截止日为 2026-05-20，文档、发行版与榜单快照的核查截至 2026-08-18 UTC。<a href="{{overview}}">版本与范围说明 ↗</a></p>
+</footer>
+</div>
+<script id="case-data" type="application/json">{{data}}</script>
+<script>
+const {base, query} = JSON.parse(document.querySelector("#case-data").textContent);
+const buttons = document.querySelectorAll("[data-gpu]");
+const list = document.querySelector("#matches");
+function show(gpu) {
+  const sample = query[gpu];
+  for (const button of buttons) button.setAttribute("aria-pressed", String(button.dataset.gpu === gpu));
+  document.querySelector("#command").textContent =
+    'python scripts/query.py "flash attention 4" --architecture ' + gpu + ' --type kernel --limit 4 --compact';
+  document.querySelector("#result-title").textContent = gpu + " → " + sample.arch + " / 前 4 条";
+  list.replaceChildren(...sample.items.map(([id, title, slug]) => {
+    const row = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = base + "wiki/kernels/" + slug + ".md";
+    link.textContent = title;
+    if (id === "kernel-flash-attention-4") row.className = "match";
+    row.append(link);
+    return row;
+  }));
+  document.querySelector("#result-note").textContent = sample.note;
+}
+for (const button of buttons) button.addEventListener("click", () => show(button.dataset.gpu));
+show("B200");
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', type=Path, default=PROJECT / 'Kernel_Learning_Studio.html')
-    parser.add_argument('--output', type=Path, default=PROJECT / 'docs/assets/studio-overview.png')
+    parser.add_argument('--output', type=Path, default=PROJECT / 'dist/studio-overview.png')
     parser.add_argument('--scroll', type=int, default=500, help='Vertical offset that brings the first diagram into view')
     args = parser.parse_args()
     if not args.input.is_file():

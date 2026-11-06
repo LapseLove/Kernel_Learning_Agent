@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "case_id": "model-pr-history",
+  "kind": "knowledge-workflow",
+  "title": "从 PR 历史，走到下一次优化",
+  "repository": "BBuf/AI-Infra-Auto-Driven-SKILLS",
+  "commit": "8309d9f244e11d6a4773fd9a3274bbecb9ce8c01",
+  "audience": "想理解、使用或搭建模型优化知识库的 AI Infra 学习者",
+  "scope": "解释 model-pr-optimization-history 的维护与使用机制，不分析某个 GPU kernel 的执行或性能。",
+  "intake": {"model": "N/A：知识库方法案例；查询样例固定 qwen3-core", "phase": "N/A", "hardware": "N/A", "parallelism": "N/A", "shape": "N/A", "dtype_layout": "N/A", "dispatch": "N/A：本页不声称某请求命中 kernel", "measurement": "none"},
+  "mental_model": "人把历史变更加工成带版本的证据；Agent 将证据与当前源码、实际运行连接，形成验证计划。",
+  "frameworks": ["SGLang", "vLLM", "TensorRT-LLM", "TokenSpeed"],
+  "claims": [
+    {"id":"one-skill","text":"一个查询 Skill 消费按框架与模型族组织的双语档案。","sources":["skill","readme"]},
+    {"id":"candidate","text":"文件历史与 PR 元数据生成候选档案；完整 diff 与当前 caller 的人工审阅才支持技术判断。","sources":["readme","filters","trace","rebuild"]},
+    {"id":"local-query","text":"query.py 检索本地 Markdown；词频计分和任一词匹配不等于语义理解。","sources":["query"]},
+    {"id":"independent-evidence","text":"历史、当前源码、请求命中和数值/性能各需对应证据。","sources":["skill","workflow"]}
+  ],
+  "maintenance_steps": [
+    {"title":"固定版本","input":"知识库与目标框架 checkout","operation":"记录两套完整 SHA","output":"有边界的源码基线","body":"知识库保存的是某次捕获的历史。目标框架可以有另一套版本；记录两者，才知道旧结论要在哪里重新核对。","risk":"刷新 source head 只更新源码边界，不能证明重新运行过模型。","source":"skill"},
+    {"title":"圈定文件","input":"git ls-files 的文件集合","operation":"MODEL_FILTERS 选择模型路径","output":"相关文件集合","body":"生成器按模型族的 include / exclude 规则筛选当前 checkout 的文件。共用文件可能同时影响多个模型，文件名也可能随历史变动。","risk":"漏选一个公共层，就可能漏掉一条重要历史；文件命中也不保证属于当前模型。","source":"filters"},
+    {"title":"反查 PR","input":"选中的模型文件","operation":"git log → 提取 PR 号 → 身份过滤","output":"候选 PR 集合","body":"沿文件追溯提交，从提交标题提取 PR 号，再用 SUBJECT_HINTS 和路径身份提示缩小范围；同时并入原档案显式引用的 PR。","risk":"无法从标题提取编号的变更、过滤范围外的路径仍可能遗漏。候选集合不是完整历史保证。","source":"trace"},
+    {"title":"重建档案","input":"候选 PR + 旧档案","operation":"取元数据与 patch；保留已有内容","output":"中英文时间线与 PR 卡片","body":"先用 --dry-run 检查 files、git_prs、reuse、fetching，再正式重建。默认复用符合条件的旧卡片，并提取保留顶部人工补充。","risk":"--refetch-existing 会重取并重渲染旧卡片；重建后仍需检查本仓库 Git diff。","source":"rebuild"},
+    {"title":"人工核查","input":"PR 完整 diff + 目标版本 caller","operation":"核对机制、资格条件与验证范围","output":"带日期、SHA、风险的审阅结论","body":"机器摘录说明哪里可能变了；人工继续追踪谁调用它、分支何时成立、哪些测试覆盖它。把结论、缺口和下一步写回档案。","risk":"open-pr-watch 是待审队列；生成卡片、合入状态或测试文件存在都不能单独证明实际收益。","source":"readme"}
+  ],
+  "reading_scenes": [
+    {"id":"overview","question":"这套知识库连接了谁？","mental_model":"维护者生产证据，Agent 消费证据并反馈验证结果。","data_basis":["skill","readme"],"visual_type":"双线路数据流图","what_to_read":"先沿上方维护线进入知识库，再沿下方使用线走向验证。","conclusion":"历史档案是两条线路的交接点。","interaction_or_static_reason":"静态总览，避免把加工关系误认为硬件时间线。"},
+    {"id":"maintain","question":"源代码怎样变成可信的历史？","mental_model":"生成器缩小候选集合，人工审阅解释机制。","data_basis":["filters","trace","rebuild","readme"],"visual_type":"输入—加工—输出的局部步骤图","what_to_read":"选择阶段，跟踪同一份候选材料的变化与缺口。","conclusion":"每一层加工都应留下出处，机器产物保留证据边界。","interaction_or_static_reason":"点击与前后步进；无自动播放，无耗时编码。"},
+    {"id":"query","question":"Agent 如何从问题找到值得读的档案？","mental_model":"先框架与模型族，再关键词；路径定位之后要读完整档案。","data_basis":["workflow","query","slugs"],"visual_type":"查询构造与真实快照摘录","what_to_read":"切换框架与主题，观察命令、路径和匹配行联动。","conclusion":"任一词匹配可以带来噪声，命中片段只提供阅读线索。","interaction_or_static_reason":"两框架 × 三主题，预计算固定快照；不冒充实时 Python 执行。"},
+    {"id":"evidence","question":"手里的证据，允许说到哪一步？","mental_model":"不同证据分别支持不同结论，不能互相替代。","data_basis":["skill","workflow"],"visual_type":"证据—结论配对实验","what_to_read":"逐项勾选假设持有的证据，检查允许与缺失的结论。","conclusion":"PR 已合入不推出当前路径被调用，也不推出更快。","interaction_or_static_reason":"假设性学习练习，所有勾选仅改变本页推理，不代表真实测量。"},
+    {"id":"practice","question":"怎样把历史转成下一次可执行验证？","mental_model":"用可证伪的问题定义实验，再记录真实产物。","data_basis":["skill","workflow"],"visual_type":"三个实验与可编辑笔记","what_to_read":"从命中、数值到性能，明确一个实验要推翻什么。","conclusion":"给出下一步能改变决策的证据。","interaction_or_static_reason":"编辑并下载本地 Markdown，不执行 GPU 实验。"}
+  ],
+  "experiments": [
+    {"title":"01 / 路径命中","hypothesis":"目标请求会进入历史 PR 改动过的路径。","method":"固定目标 commit，选择满足条件、恰在边界、触发 fallback 的三类输入；用实际 trace 核对 kernel 与 caller。","falsifier":"满足静态条件的请求仍未命中：继续检查开关、backend、Graph 与运行环境。"},
+    {"title":"02 / 数值边界","hypothesis":"候选替换在所声明的 shape / dtype 范围内满足预设容差。","method":"保留 baseline，覆盖目标 dtype、非整齐 shape 与边界输入；记录容差、种子和原始输出。","falsifier":"出现超容差样例：缩小适用范围或修改实现，再复测。"},
+    {"title":"03 / 同口径性能","hypothesis":"在已确认命中且正确的负载上，改动改善所选指标。","method":"对齐硬件、模型、shape、并行与 baseline；固定 warmup / JIT / CUDA Graph 策略和试验次数。trace 与计时分开采集。","falsifier":"收益不稳定或端到端无改善：保留原始样本，重新检查瓶颈与测量方法。"}
+  ],
+  "unknowns": ["本页未运行上游重建器或查询脚本；查询摘录由固定文件预计算。", "本页未逐条审计查询结果中的 PR，也未确认其当前线上状态。", "没有 GPU trace、正确性复现或性能复测。", "实验建议是本项目教学整理，不是上游已完成的实验报告。"]
+}

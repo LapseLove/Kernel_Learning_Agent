@@ -1,0 +1,546 @@
+{
+  "case_id": "kern-runtime",
+  "kind": "runtime-integration",
+  "repository": "https://github.com/pegainfer-project/kern",
+  "commit": "83c3f62be263da5f1e482fe90872a29bc4800b77",
+  "reviewed_on": "2026-11-05",
+  "identity": {
+    "language_readme": "https://github.com/kern-project/kern/blob/7be98bb6c1002c084a1a10683e559e58c9abb9c7/README.md"
+  },
+  "scope": {
+    "model": "Qwen3.8-27B for the hosted layout; dispatch demo uses teaching capacities",
+    "phases": [
+      "prefill",
+      "decode",
+      "head"
+    ],
+    "hardware": "One GB300 for the cited Qwen3.8 reports; no local GPU run",
+    "parallelism": "Single GPU for the layout walkthrough; conditional TP and DCP contracts explained separately",
+    "vllm_compatibility": "上游文档记录插件于 2026-10-13 对接 vLLM 12b005eef；早期 Qwen3.8 A/B 使用 e97573215。当前 wheel 与其它 vLLM 版本的兼容性未验证。"
+  },
+  "package_parts": [
+    {
+      "type": "01 / 执行声明",
+      "label": "manifest.json",
+      "body": "声明数据布局、op、program 与并行拓扑。"
+    },
+    {
+      "type": "02 / 设备代码",
+      "label": "kernel modules",
+      "body": "编译后的设备代码；模块由 SHA-256 标识。"
+    },
+    {
+      "type": "03 / 模型参数",
+      "label": "checkpoint",
+      "body": "原模型权重，按 manifest 的绑定规则载入。"
+    }
+  ],
+  "manifest_chain": [
+    {
+      "name": "Program",
+      "desc": "一个具名入口，列出有序的 calls。"
+    },
+    {
+      "name": "Call",
+      "desc": "给 op 绑定 buffer、state 和变量等实参。"
+    },
+    {
+      "name": "Op",
+      "desc": "声明参数类型，提供一条或多条 launch。"
+    },
+    {
+      "name": "Launch",
+      "desc": "指定设备入口或内置实现，以及 grid、block 等参数。"
+    }
+  ],
+  "verifier": [
+    {
+      "name": "声明与容量",
+      "checks": "类型、变量上界、shape、grid 和偏移",
+      "boundary": "不证明实际输入数据或设备执行正确"
+    },
+    {
+      "name": "声明的数据流",
+      "checks": "读前写入、参数读写权限、scratch 与引用",
+      "boundary": "不分析 opaque cubin 的实际访存"
+    },
+    {
+      "name": "运行时 ABI",
+      "checks": "加载后核对设备函数参数数量与字节布局",
+      "boundary": "ABI 一致仍需数值与安全测试"
+    }
+  ],
+  "ownership": [
+    {
+      "role": "调度与持久页",
+      "name": "vLLM",
+      "items": "调度请求、分配 KV / recurrent state、组织 Graph 与采样。"
+    },
+    {
+      "role": "模型接口",
+      "name": "kern_vllm",
+      "items": "声明层布局、绑定页、从 metadata 分组、搬运每步输入与输出。"
+    },
+    {
+      "role": "执行与内部存储",
+      "name": "kern runtime",
+      "items": "绑定权重、分配 buffer 和 scratch、编译并提交 program。"
+    }
+  ],
+  "dispatch_demo": {
+    "decode_rows": 4,
+    "prefill_seqs": 2,
+    "tokens": 16,
+    "max_seqs": 8
+  },
+  "presets": [
+    {
+      "name": "混合请求",
+      "q": [
+        1,
+        1,
+        4,
+        3,
+        1
+      ]
+    },
+    {
+      "name": "把 E 移到前面",
+      "q": [
+        1,
+        1,
+        1,
+        4,
+        3
+      ],
+      "requests": [
+        "A",
+        "B",
+        "E",
+        "C",
+        "D"
+      ]
+    },
+    {
+      "name": "三个多 token 请求",
+      "q": [
+        4,
+        3,
+        2
+      ]
+    },
+    {
+      "name": "六个单 token 请求",
+      "q": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "超过容量",
+      "q": [
+        9,
+        8
+      ]
+    }
+  ],
+  "stream_steps": [
+    {
+      "title": "vLLM 先写好输入",
+      "body": "插件在 vLLM 的 GPU 队列上，把 C、D 这组的 7 个 token 和对应信息写进 kern 的输入缓冲区。",
+      "sources": [
+        "copy"
+      ]
+    },
+    {
+      "title": "kern 等输入就绪",
+      "body": "写入之后，vLLM 队列记录 before 事件。kern 队列等到这个事件才开始读。",
+      "sources": [
+        "events"
+      ]
+    },
+    {
+      "title": "kern 算出 7 行结果",
+      "body": "kern 发起 prefill 清单里的 GPU 工作，读取本组输入和已经绑定的状态页，写出 7 行 hidden。",
+      "sources": [
+        "events",
+        "copy"
+      ]
+    },
+    {
+      "title": "vLLM 等结果就绪",
+      "body": "kern 队列记录 after 事件。vLLM 队列等到后，再把 7 行 hidden 复制到整轮输出的对应位置。",
+      "sources": [
+        "events",
+        "copy"
+      ]
+    }
+  ],
+  "layout": {
+    "model": "Qwen3.8-27B",
+    "kernel_block_tokens": 64,
+    "kv_token_bytes": 4096,
+    "kv_block_bytes": 262144,
+    "state_bytes": 3207168,
+    "kernel_blocks": 13,
+    "page_tokens": 832,
+    "page_bytes": 3407872,
+    "unused_gdn_capacity_bytes": 200704
+  },
+  "reported": [
+    {
+      "source": "results",
+      "label": "早期接入 · 随机请求",
+      "setup": "2026-09-25 · Qwen3.8-27B · 单 GB300 · vLLM e97573215 · 1,024 输入 / 256 输出 token",
+      "columns": [
+        "并发请求",
+        "原生 vLLM",
+        "vLLM + kern"
+      ],
+      "rows": [
+        [
+          "1",
+          "94",
+          "98"
+        ],
+        [
+          "128",
+          "3,435",
+          "2,800"
+        ]
+      ],
+      "metric": "输出 token/s",
+      "caveat": "并发 1 时略高，并发 128 时约低 18%。这一版的混合轮次仍逐条跑 prefill。"
+    },
+    {
+      "source": "rsi-table",
+      "label": "优化后 · 同一份 AgentX 流量",
+      "setup": "2026-09-25 → 26 · Qwen3.8-27B · 每组单 GB300 · vLLM e97573215 · 并发 24 · 回放 1 小时",
+      "columns": [
+        "指标",
+        "原生 vLLM",
+        "kern 起始版",
+        "kern 优化版"
+      ],
+      "rows": [
+        [
+          "完成请求",
+          "1,310",
+          "1,446",
+          "1,528"
+        ],
+        [
+          "输出 token/s",
+          "291.6",
+          "325.4",
+          "336.5"
+        ],
+        [
+          "首 token 延迟 p50",
+          "413 ms",
+          "437 ms",
+          "422 ms"
+        ],
+        [
+          "token 间隔 p50",
+          "30.0 ms",
+          "23.6 ms",
+          "21.9 ms"
+        ],
+        [
+          "token 间隔 p99",
+          "62.1 ms",
+          "78.6 ms",
+          "75.1 ms"
+        ]
+      ],
+      "caveat": "优化版比原生多完成约 17% 的请求，输出吞吐约高 15%。生成中的典型 token 间隔更短，但首 token 的中位延迟和 token 间隔的尾部延迟都更高。"
+    },
+    {
+      "source": "ragged-results",
+      "label": "只改分组 · prefill 合并实验",
+      "setup": "2026-10-06 · Qwen3.8-27B · 单 GB300 · 同一份清单对比逐条调用和合组调用",
+      "columns": [
+        "空缓存输入",
+        "合组加速比"
+      ],
+      "rows": [
+        [
+          "16 个请求 × 32 token",
+          "7.5×"
+        ],
+        [
+          "4 个请求 × 2,048 token",
+          "1.05×"
+        ]
+      ],
+      "caveat": "AgentX 并发 24 的线上回放中，仅 0.08% 的轮次有至少两个 prefill 请求，两种模式的整场吞吐约 335–336 token/s。是否经常出现可合并的短请求，决定了微基准的收益能兑现多少。"
+    }
+  ],
+  "experiments": [
+    {
+      "title": "核对 ragged 调用账本",
+      "hypothesis": "旧 workload 转换会改变 mixed step 的 program 形状分布。",
+      "method": "固定 q=[1,1,4,3,1]，用 forward 的 runs 与 workload.calls 分别导出逐调用 q、上下文和权重；再对真实 trace 逐步比对。",
+      "falsifier": "两者保留完全相同的 program、请求区间与调用形状。",
+      "source": "workload"
+    },
+    {
+      "title": "检查借址与换页的正确性",
+      "hypothesis": "重绑 cache 后，program 使用新地址；prefix align 下跨块仍保留 recurrent state。",
+      "method": "固定权重和请求，比较 eager、decode Graph 与原生基线的 logits；覆盖首 token、跨页、cache 重分配，并记录容差与近似并列。",
+      "falsifier": "重绑后旧页仍被写，或跨页出现超容差差异。",
+      "source": "events"
+    },
+    {
+      "title": "找出分组何时有收益",
+      "hypothesis": "相邻长 query 的 ragged program 在相同工作量下减少重复的权重读，但端到端收益取决于请求分布。",
+      "method": "固定同版本、GPU、输入和 Graph 配置，逐条 prefill 对照 ragged；warmup 后重复采样，分别记录调用数、GPU 时间、HBM bytes、TTFT / TPOT 与输出吞吐。",
+      "falsifier": "调用减少但 HBM 读量未降，或服务指标没有改善。",
+      "source": "runs"
+    }
+  ],
+  "claims": [
+    {
+      "id": "model-package",
+      "statement": "模型包由声明、设备代码、权重构成；kern 是执行器。",
+      "sources": [
+        "package",
+        "hosts",
+        "load",
+        "issue",
+        "standalone"
+      ]
+    },
+    {
+      "id": "plugin",
+      "statement": "kern-llm 包含 kern_vllm，通过 vLLM 入口注册 KernForCausalLM。",
+      "sources": [
+        "wheel",
+        "entry",
+        "register"
+      ]
+    },
+    {
+      "id": "ownership",
+      "statement": "页由 vLLM 分配，kern 按地址与实际布局绑定；每步输入、hidden 和 head 另行搬运。",
+      "sources": [
+        "layers",
+        "bind",
+        "backend",
+        "events",
+        "admit",
+        "copy",
+        "head",
+        "group"
+      ]
+    },
+    {
+      "id": "dispatch",
+      "statement": "纯单 token 分块；mixed 按连续同类 q 分组；无 prefill 的长 query 报错。",
+      "sources": [
+        "construct",
+        "dispatch",
+        "runs"
+      ]
+    },
+    {
+      "id": "layout",
+      "statement": "Qwen3.8 的 13 个 64-token attention blocks 构成一个 832-token 管理页。",
+      "sources": [
+        "layout"
+      ]
+    },
+    {
+      "id": "measurement",
+      "statement": "trace 记录 metadata；旧 workload 不等同在线分组；性能结果为上游报告。",
+      "sources": [
+        "trace",
+        "workload",
+        "docs-drift",
+        "results",
+        "rsi",
+        "limits"
+      ]
+    },
+    {
+      "id": "design",
+      "statement": "模型包可定制 kernel 和组合，接入 vLLM 复用服务层并获得线上形状。",
+      "sources": [
+        "motivation",
+        "kernel-swap",
+        "hosts",
+        "serve-loop"
+      ]
+    },
+    {
+      "id": "mixed-perf",
+      "statement": "早期并发扫描、优化后线上回放和合组实验比较的变量不同。",
+      "sources": [
+        "results",
+        "rsi-table",
+        "ragged-results"
+      ]
+    }
+  ],
+  "reading_scenes": [
+    {
+      "id": "overview",
+      "question": "一批请求进来，谁负责什么？",
+      "mental_model": "vLLM 决定本轮处理哪些 token，插件交接，kern 执行模型。",
+      "data_basis": [
+        "entry",
+        "dispatch",
+        "copy",
+        "head"
+      ],
+      "visual_type": "three-role-flow",
+      "what_to_read": "顺着输入和返回两条路径辨认三方",
+      "conclusion": "vLLM 保留调度和采样，kern 接手模型计算",
+      "interaction_or_static_reason": "先读静态全景"
+    },
+    {
+      "id": "dispatch",
+      "question": "5 个请求，为什么调用 3 次？",
+      "mental_model": "按当前顺序，连续单 token 请求与连续多 token 请求分别组队。",
+      "data_basis": [
+        "construct",
+        "dispatch",
+        "runs"
+      ],
+      "visual_type": "nested-request-groups",
+      "what_to_read": "将 A–E 的 token 数与组边框对应，观察最后一组 E",
+      "conclusion": "E 前面隔着多 token 组，所以独立调用",
+      "interaction_or_static_reason": "替换本轮 token 数或使用预设，比较分组"
+    },
+    {
+      "id": "host",
+      "question": "跟着 C 和 D，哪些数据跨过边界？",
+      "mental_model": "7 个新 token 的输入与输出要拷贝，历史状态由 vLLM 分配并借址。",
+      "data_basis": [
+        "bind",
+        "copy",
+        "head",
+        "admit"
+      ],
+      "visual_type": "round-trip-with-state",
+      "what_to_read": "顺着 C 和 D 的 7 个 token 到 7 行 hidden，再分辨持久状态和采样",
+      "conclusion": "复制的是本轮输入输出，绑定的是历史状态页",
+      "interaction_or_static_reason": "同一组数据延续上一节，静态呈现"
+    },
+    {
+      "id": "binding",
+      "question": "插件如何拿到缓存地址？",
+      "mental_model": "先声明布局，由 vLLM 分配，最后绑定真实 GPU 地址。",
+      "data_basis": [
+        "entry",
+        "register",
+        "layers",
+        "bind",
+        "host-region",
+        "events",
+        "host-lifecycle"
+      ],
+      "visual_type": "binding-lifecycle",
+      "what_to_read": "追踪 kv.l3 从层声明到借用的 GPU 地址",
+      "conclusion": "地址随缓存张量变化，绑定后才编译宿主 program",
+      "interaction_or_static_reason": "静态因果链足够"
+    },
+    {
+      "id": "streams",
+      "question": "两边各有队列，怎么等到数据？",
+      "mental_model": "before 保护输入，after 保护输出。",
+      "data_basis": [
+        "events",
+        "copy",
+        "host-graph",
+        "backend"
+      ],
+      "visual_type": "responsive-logical-steps",
+      "what_to_read": "顺箭头追 C、D 的 before/after，再看 E 如何复用同一缓冲区",
+      "conclusion": "事件只给出依赖顺序",
+      "interaction_or_static_reason": "逐步走完两次交接，可后退和重置"
+    },
+    {
+      "id": "manifest",
+      "question": "kern 怎么知道要跑哪些 GPU 操作？",
+      "mental_model": "manifest 记录执行清单，runtime 将其展开并发起。",
+      "data_basis": [
+        "package",
+        "hosts",
+        "load",
+        "issue",
+        "standalone",
+        "verify"
+      ],
+      "visual_type": "recipe-assembly",
+      "what_to_read": "区分三种交付物，再查看一个 program 的层级",
+      "conclusion": "清单、设备代码和权重各有职责，独立和插件入口复用执行器",
+      "interaction_or_static_reason": "清单层级和验证边界按需展开"
+    },
+    {
+      "id": "layout",
+      "question": "为什么 64 token 的小块会组成 832 token 的管理页？",
+      "mental_model": "用整数个 attention 小块覆盖一份 GDN 状态。",
+      "data_basis": [
+        "layout",
+        "admit"
+      ],
+      "visual_type": "capacity-blocks",
+      "what_to_read": "先看两个字节数，再数 13 个格",
+      "conclusion": "布局的容量可以从源码手算",
+      "interaction_or_static_reason": "进阶静态推导"
+    },
+    {
+      "id": "why-kern",
+      "question": "为什么把模型执行单独做成 kern？",
+      "mental_model": "把优化对象变成可改、可验证的模型包，再把服务职责交给 vLLM。",
+      "data_basis": [
+        "motivation",
+        "kernel-swap",
+        "hosts",
+        "serve-loop",
+        "workload"
+      ],
+      "visual_type": "offline-serving-loop",
+      "what_to_read": "区分离线迭代的清单与线上产生的请求形状",
+      "conclusion": "清单可以独立验证，接入后用实际负载检验",
+      "interaction_or_static_reason": "静态三段循环足够"
+    },
+    {
+      "id": "evidence",
+      "question": "怎样验证分组更快？",
+      "mental_model": "先核对实际调用形状，再做对照测量。",
+      "data_basis": [
+        "results",
+        "rsi-table",
+        "trace",
+        "workload",
+        "docs-drift",
+        "ragged-results"
+      ],
+      "visual_type": "evidence-details",
+      "what_to_read": "先对比相同输入的两套调用形状，再读上游报告条件",
+      "conclusion": "分组数量不能替代实测",
+      "interaction_or_static_reason": "进阶静态证据"
+    },
+    {
+      "id": "performance",
+      "question": "接入后性能怎样？",
+      "mental_model": "吞吐和延迟看负载、版本及指标。",
+      "data_basis": [
+        "results",
+        "rsi-table",
+        "ragged-results"
+      ],
+      "visual_type": "benchmark-tables",
+      "what_to_read": "对照早期并发、优化后真实流量与合组微基准",
+      "conclusion": "收益取决于场景，尾延迟可能更高",
+      "interaction_or_static_reason": "原始表格保留单位和基线"
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "case_id": "kernel-wiki",
+  "commit": "b6b4301f15e8ce6955a56776690643ce5db369e6",
+  "repo": "https://github.com/mit-han-lab/KernelWiki",
+  "sources": {
+    "overview": [
+      "README.md",
+      10,
+      43
+    ],
+    "architecture": [
+      "README.md",
+      82,
+      112
+    ],
+    "deepgemm": [
+      "wiki/kernels/deepgemm.md",
+      1,
+      12
+    ],
+    "skill": [
+      "SKILL.md",
+      30,
+      64
+    ],
+    "output": [
+      "SKILL.md",
+      94,
+      115
+    ],
+    "scoring": [
+      "scripts/query.py",
+      118,
+      146
+    ],
+    "ranking": [
+      "scripts/query.py",
+      329,
+      371
+    ],
+    "policy": [
+      "scripts/pr_policy.py",
+      1091,
+      1103
+    ],
+    "gpu": [
+      "scripts/pr_policy.py",
+      100,
+      119
+    ],
+    "lookup": [
+      "scripts/get_page.py",
+      129,
+      175
+    ],
+    "fa4": [
+      "wiki/kernels/flash-attention-4.md",
+      1,
+      22
+    ],
+    "boundary": [
+      "wiki/kernels/flash-attention-4.md",
+      41,
+      65
+    ],
+    "paper": [
+      "sources/docs/flash-attention-4.md",
+      1,
+      42
+    ],
+    "blog": [
+      "sources/blogs/flash-attention-4.md",
+      1,
+      30
+    ],
+    "schema": [
+      "references/schema.md",
+      152,
+      169
+    ],
+    "ledger": [
+      "candidates/README.md",
+      1,
+      4
+    ],
+    "refresh": [
+      "scripts/refresh_candidate_ledger.py",
+      141,
+      195
+    ],
+    "index_input": [
+      "scripts/generate-indices.py",
+      45,
+      68
+    ],
+    "scan": [
+      "scripts/query.py",
+      89,
+      105
+    ],
+    "generate": [
+      "scripts/generate-pr-pages.py",
+      335,
+      391
+    ],
+    "indices": [
+      "scripts/generate-indices.py",
+      396,
+      415
+    ],
+    "verify": [
+      "scripts/validate.py",
+      949,
+      982
+    ],
+    "artifact": [
+      "artifacts/prs/cutlass/PR-3130/PROVENANCE.yaml",
+      1,
+      10
+    ]
+  },
+  "external_sources": {
+    "bbuf_skill": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/SKILL.md#L1-L27",
+    "bbuf_query": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/scripts/query.py#L84-L177",
+    "bbuf_trace": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L737-L849",
+    "bbuf_rebuild": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/tools/rebuild_model_pr_history_from_git.py#L1870-L1985",
+    "bbuf_example": "https://github.com/BBuf/AI-Infra-Auto-Driven-SKILLS/blob/8309d9f244e11d6a4773fd9a3274bbecb9ce8c01/model-pr-optimization-history/sglang/qwen3-core/README.zh.md#L44-L45"
+  },
+  "query": {
+    "B200": {
+      "arch": "sm100",
+      "items": [
+        [
+          "kernel-flash-attention-4",
+          "FlashAttention-4",
+          "flash-attention-4"
+        ],
+        [
+          "kernel-flash-attention-sm100-mla-topk",
+          "FlashAttention SM100 MLA TopK Sparse Forward",
+          "flash-attention-sm100-mla-topk"
+        ],
+        [
+          "kernel-flashmla",
+          "FlashMLA attention kernels",
+          "flashmla"
+        ],
+        [
+          "kernel-tensorrt-llm-blackwell-indexer",
+          "TensorRT-LLM Blackwell FP4 DSA Indexer",
+          "tensorrt-llm-blackwell-indexer"
+        ]
+      ],
+      "note": "首条是 FA4。打开页面读 architectures、confidence 和 sources，再追到论文、作者博客与固定实现。"
+    },
+    "H100": {
+      "arch": "sm90",
+      "items": [
+        [
+          "kernel-flashmla",
+          "FlashMLA attention kernels",
+          "flashmla"
+        ],
+        [
+          "kernel-sparse-mla",
+          "Sparse MLA",
+          "sparse-mla"
+        ],
+        [
+          "kernel-deepgemm",
+          "DeepGEMM — runtime-JIT tensor-core kernels",
+          "deepgemm"
+        ],
+        [
+          "kernel-gated-dual-gemm",
+          "Gated Dual GEMM (Gate-Up + Activation)",
+          "gated-dual-gemm"
+        ]
+      ],
+      "note": "FA4 页面只标了 sm100，按 sm90 过滤时被排除。FlashMLA 和 DeepGEMM 是检索候选；还要打开页面判断是否真的回答 FA4 的问题。"
+    }
+  }
+}

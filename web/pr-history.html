@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="沿维护者与 Agent 两条线路，理解 BBuf 模型 PR 优化史知识库。固定源码、离线交互、证据边界。">
+  <title>PR History · 从历史走到下一次优化</title>
+  <link rel="stylesheet" href="pr-history.css">
+  <link rel="stylesheet" href="reader.css">
+  <!--PR_HISTORY_DATA-->
+  <script defer src="reader.js"></script>
+  <script defer src="pr-history.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#overview">跳到正文</a>
+<header class="site-header">
+  <a class="brand" href="#overview"><span class="brand-mark">↗</span> KERNEL LEARNING <span class="brand-sub">/ FIELD NOTES 03</span></a>
+  <nav aria-label="章节导航"><a href="#maintain">人如何维护</a><a href="#query">Agent 如何使用</a><a href="#evidence">证据练习</a></nav>
+  <button class="source-button" data-source="all">出处与版本 ↗</button>
+</header>
+<main>
+  <section id="overview" class="intro">
+    <div class="intro-top"><span class="eyebrow">MODEL PR OPTIMIZATION HISTORY</span><span class="edition">BBuf 知识库 · 交互阅读版</span></div>
+    <div class="intro-heading"><h1>从 PR 历史，<br>走到<span>下一次优化。</span></h1><div class="intro-copy"><p>在动手改模型之前，先看懂它为什么变成今天这样。</p><p>沿两条线读懂这套知识库：<b class="human-color">人把变更整理成证据</b>，<b class="agent-color">Agent 用证据决定下一步</b>。</p><div class="intro-meta">固定快照 <code>8309d9f…</code> <span>核对于 2026.11.03</span></div></div></div>
+    <figure class="overview-map" aria-label="维护者将 Git 与 PR 加工为历史档案，Agent 从模型问题查询档案，再核对当前源码并规划验证。箭头表示信息流，不表示时间。">
+      <div class="map-topline"><span>01 / 一套知识库，连接两种工作</span><span>箭头 = 信息流</span></div>
+      <div class="map-lane human-lane"><div class="lane-role"><i>H</i><b>维护者</b><span>生产证据</span></div><div class="map-node"><small>原始材料</small><b>Git 历史 · PR diff</b><span>固定上游源码版本</span></div><div class="flow-arrow"><span>筛选 · 追溯</span>→</div><div class="map-node"><small>加工</small><b>生成器 + 人工审阅</b><span>候选发现 → 机制核查</span></div></div>
+      <div class="map-connector human-color"><span>写入档案</span>↓</div>
+      <div class="dossier-core"><div><span class="core-icon">≡</span><div><small>交接点 / HISTORY DOSSIER</small><h2>按框架 × 模型族组织的 PR 档案</h2></div></div><p>带日期的人工补充 <span>／</span> 文件覆盖 <span>／</span> 时间线 <span>／</span> PR 卡片与验证风险</p><div class="framework-strip"><span>SGLang</span><span>vLLM</span><span>TensorRT-LLM</span><span>TokenSpeed</span><small>模型覆盖随框架而异</small></div></div>
+      <div class="map-connector agent-color"><span>按查询结果提供历史证据</span>↓</div>
+      <div class="map-lane agent-lane"><div class="lane-role"><i>A</i><b>Agent</b><span>使用证据</span></div><div class="map-node"><small>任务输入</small><b>模型族 · 框架 · 问题</b><span>query.py 定位本地档案</span></div><div class="flow-arrow"><span>读取 · 提取</span>→</div><div class="map-node"><small>工程判断</small><b>当前 caller → 验证计划</b><span>把历史放回当前请求中核对</span></div></div>
+      <figcaption>一个查询 Skill 管一套历史知识库；每次任务留下简短的证据笔记。<button data-source="skill">查看依据 ↗</button></figcaption>
+    </figure>
+    <a class="reading-next" href="#maintain">沿维护线路开始阅读 <span>↓</span></a>
+  </section>
+
+  <section id="maintain" class="chapter">
+    <div class="chapter-heading"><span class="part-label human-color">01 / 维护线路</span><div><h2>源代码怎样变成可信的历史？</h2><p>追踪一份材料的变化。生成器帮助缩小候选集合，人工审阅继续解释机制、边界与风险。</p></div></div>
+    <div class="stage-tabs" role="group" aria-label="维护阶段"></div>
+    <div id="maintenance-figure" class="maintenance-figure" data-figure="maintenance"></div>
+    <div class="maintenance-risk"><span>这一步的缺口</span><p id="maintenance-risk"></p></div>
+    <details class="evidence-details"><summary>实际维护时，命令按什么顺序执行？</summary><p>以下在上游仓库根目录运行；先准备对应框架的 Git checkout 与可用的 <code>gh api</code>。这里只展示命令。</p><pre>python tools/check_open_pr_watch.py --output model-pr-optimization-history/open-pr-watch.md
+python tools/rebuild_model_pr_history_from_git.py --framework sglang --model qwen3-core --dry-run
+python tools/rebuild_model_pr_history_from_git.py --framework sglang --model qwen3-core</pre><p>正式重建会改写所选模型的中英文档案。检查 Git diff，确认旧人工补充与相邻模型归因，再运行相关行为测试。<button data-source="args">参数源码 ↗</button></p></details>
+  </section>
+
+  <section id="query" class="chapter">
+    <div class="chapter-heading"><span class="part-label agent-color">02 / 使用线路</span><div><h2>从一个问题，找到值得读的档案。</h2><p>“Qwen3 的 norm fusion，以前有人做过吗？”先固定目标框架与模型族，再检索历史中的线索。</p></div></div>
+    <div class="query-workbench"><div class="query-controls"><span class="mini-label">构造一次查询</span><label for="framework">目标框架</label><select id="framework"><option value="sglang">SGLang</option><option value="vllm">vLLM</option></select><label for="model">模型族</label><select id="model"><option value="qwen3-core">qwen3-core</option></select><label for="topic">问题关键词</label><select id="topic"><option value="fused qk norm">fused qk norm</option><option value="moe">moe</option><option value="loader">loader</option></select><p class="small-note">演示限定 2 个框架、1 个模型族、3 组关键词。完整可用目录以 <code>query.py --list</code> 为准。</p><button class="text-button" data-source="slugs">模型名为什么不能混用？ ↗</button></div>
+    <div class="query-results" aria-live="polite"><div class="result-heading"><span class="status-dot"></span> 固定快照样例 <span>离线 · 非实时执行</span></div><pre class="command"><code id="query-command"></code></pre><div class="result-path"><span>READ</span><a id="query-path" target="_blank" rel="noreferrer"></a></div><div id="query-matches"></div><p class="result-note">展示前 3 条命中的摘要；原始行最多 220 字符，可展开核对。完整脚本默认最多展示 6 条。匹配任一词就可入选，因此 <code>fused</code> 也可能带来 MoE 线索。</p></div></div>
+    <div class="read-sequence"><span class="mini-label">定位之后，怎么读？</span><div><b>先读顶部人工补充</b><span>核对审阅日期与 SHA</span></div><i>→</i><div><b>再看覆盖与 PR 卡</b><span>提取文件、机制、风险</span></div><i>→</i><div><b>回到目标版本 caller</b><span>核对 gate 与 fallback</span></div></div>
+    <p class="section-conclusion">检索输出决定“接下来读哪里”；完整档案和当前源码决定“接下来验证什么”。<button data-source="query">查询实现 ↗</button></p>
+  </section>
+
+  <section id="evidence" class="chapter">
+    <div class="chapter-heading"><span class="part-label">03 / 判断边界</span><div><h2>手里的证据，允许说到哪一步？</h2><p>勾选你假设已经拿到的证据，观察它能支持哪条结论。各项独立，勾选不会执行实验，也不代表本项目获得了这些证据。</p></div></div>
+    <div class="evidence-lab"><div class="evidence-inputs"><div class="lab-heading">假设持有的证据 <button id="reset-evidence">重置 ↺</button></div><label><input type="checkbox" id="proof-merged"><span><b>合入记录</b><small>PR 状态与合入提交已核实</small></span></label><label><input type="checkbox" id="proof-source"><span><b>当前源码审阅</b><small>固定 caller、分支条件与 fallback</small></span></label><label><input type="checkbox" id="proof-trace"><span><b>实际运行 trace</b><small>目标请求与候选 kernel 对应</small></span></label><label><input type="checkbox" id="proof-numeric"><span><b>正确性记录</b><small>目标输入、容差与原始输出</small></span></label><label><input type="checkbox" id="proof-perf"><span><b>同口径性能复测</b><small>相同负载与 baseline，含环境与方法</small></span></label></div><div class="claim-output" aria-live="polite"><span class="mini-label">由证据推导结论</span><div id="proof-claims"></div><div class="claim-verdict" id="proof-verdict"></div></div></div>
+    <p class="section-conclusion">作者报告的结果记作 <code>reported</code>；本地复现要另有环境与原始产物，才能记作 <code>reproduced</code>。<button data-source="skill">证据边界 ↗</button></p>
+  </section>
+
+  <section id="practice" class="chapter">
+    <div class="chapter-heading"><span class="part-label">04 / 带走一个方法</span><div><h2>把历史变成下一次可执行验证。</h2><p>从历史中选一条真实热路径，提出能被实验推翻的问题。下面是本项目整理的验证模板，尚未执行。</p></div></div>
+    <div class="experiment-list" id="experiments"></div>
+    <div class="notebook"><div><span class="mini-label">你的本次运行笔记</span><h3>记录“证据改变了哪个决定”。</h3><p>编辑后下载为 Markdown。笔记只留在本页，刷新前请下载保存。</p><button id="download-notes" class="primary-button">下载证据笔记 ↓</button><span id="download-status" role="status"></span></div><label class="notes-label" for="notes">可编辑笔记<textarea id="notes" spellcheck="false"></textarea></label></div>
+    <details class="evidence-details"><summary>读完后，用这三个问题检查理解</summary><ol><li>生成器可能漏掉什么历史？为什么人工仍要读完整 diff？</li><li>为什么命中 <code>fused qk norm</code> 的行未必都在讲 QK norm？</li><li>只有 PR 已合入记录时，还要什么证据才能说“我的请求更快了”？</li></ol></details>
+  </section>
+</main>
+<footer><div><b>历史给方向，验证给答案。</b><p>基于 BBuf / AI-Infra-Auto-Driven-SKILLS 的固定源码整理。无 GPU 复测；本页不认证查询样例中 PR 的实现与当前状态。</p></div><button data-source="all">固定来源与已知缺口 ↗</button></footer>
+<dialog id="source-dialog" aria-labelledby="source-title"><div class="dialog-top"><h2 id="source-title">固定来源与版本</h2><button id="close-source" aria-label="关闭出处">×</button></div><div id="source-content"></div></dialog>
+<noscript>此页面的交互和证据摘录需要启用 JavaScript。</noscript>
+</body>
+</html>

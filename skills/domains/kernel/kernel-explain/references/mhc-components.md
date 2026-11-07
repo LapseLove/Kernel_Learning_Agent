@@ -15,6 +15,6 @@
 | 公式与属性比较 | equation-strip / property-row / compare-table | 正文保留必需公式；有物理含义的数量比较用表或条形图 |
 | 源码映射 | openSource / sourceRail / source-dialog | 统一抽屉展示 pinned 行号和已导入真实代码，不重复展开全部源码 |
 
-`build-mhc` 内联上述代码与样式为离线 HTML，勿手改生成物。在桌面浏览器检查正文、图形、公式和源码。图形需要局部横向滚动时给出提示，公式与源码各用自己的滚动区。
+`build-mhc` 内联上述代码与样式为离线 HTML，勿手改生成物。图形需要局部横向滚动时给出提示，公式与源码各有自己的滚动区；正文不可横向溢出。
 
 可步进场景的共用方法见 [scene-author](../../../../formats/html/scene-author/SKILL.md)。截图工具兼容连续页面的 data-figure：逐状态捕获，静态图只捕获一次。每个受影响主图必须实际打开目检，并分别完成技术和视觉审查。

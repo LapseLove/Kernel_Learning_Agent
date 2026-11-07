@@ -18,7 +18,7 @@
 | narrator-cued reveal 与 seek-safe shot | 用户控制前进/后退/重置，任何步骤可直接恢复；切换不改变技术语义，不按秒解释 GPU 时间 |
 | bounded frame packet / worker ownership | 按场景生成仅含相关事实与源码的 JSON 包，默认上限 24 KiB，避免给作者预载全部资料 |
 | frame contract lint + rendered QA sheet | 场景结构检查 + 浏览器逐场景/逐步截图 + QA 索引；人工/视觉 reviewer 必须实际打开图像 |
-| 主题一致性与 CJK 字形检查 | 统一类型角色、颜色语义和标题基线；在目标浏览器和窄屏实际检查中文/公式，不照搬视频固定 1920×1080 字号 |
+| 主题一致性与 CJK 字形检查 | 统一类型角色、颜色语义和标题基线，在桌面浏览器实际检查中文和公式 |
 
 视频专用 TTS、音素、字幕时间戳、ffmpeg、MP4 渲染和发布脚本不进入默认 HTML 依赖。网页保留导航、可访问控件和滚动；没有字幕保留区，也没有自动推进的强制观看节奏。上下游自己的规则（例如隐藏 PR 状态）不覆盖本项目的证据要求。
 
@@ -26,7 +26,7 @@
 
 - `python scripts/lesson_scene_tools.py --case cases/mhc-mega/case.json --out dist/mhc-packets`：检查 `reading_scenes`，将 source_ids 解析为固定 SHA 链接，按场景输出有界作者包。可用 `--manifest` 指定独立计划；不要求新建第二份事实表。
 - `python scripts/capture_lesson_scenes.py --html MHC_Learning_Studio.html --out dist/mhc-qa --reader`：用本机 Edge 和既有 Playwright 依赖截图每个 reader 场景及步骤，生成 `states.json` 和可点击原图的 `index.html`。
-- 加 `--width 390 --height 844` 生成窄屏样本；`--channel chromium` 使用已安装的 Chromium。任意页面可用 `--selectors`；复杂交互可用 `--plan` 提供顺序 click 和截图目标。
+- 可用 `--width 1440 --height 950` 指定桌面窗口尺寸。加 `--channel chromium` 使用已安装的 Chromium。任意页面可用 `--selectors`，复杂交互可用 `--plan` 提供点击顺序和截图目标。
 
 工具只产生检查素材。`review: unreviewed` 不会自动改成 pass；Technical Reviewer 和 Visual Reviewer 仍分别核验同一交付版本。
 

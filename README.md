@@ -11,7 +11,7 @@
 1. **核查证据。** 固定版本和边界，从真实入口走完一个例子，再改变一个条件核对分支。领域模块补齐该问题特有的事实。
 2. **规划讲解。** 先列知识地图，按读者掌握程度分配简讲、细讲和按需展开。先回答是什么、为什么，再用同一个例子讲完整路径、决策和实现。
 3. **选择表达。** 讲义沿提纲交付。HTML 每节围绕一个问题，用主图呈现关系，把源码与证据放在相关机制旁；需要跟踪状态变化时才加步进。
-4. **审查与迭代。** 核对结论、真实路径与反例。HTML 另外走读页面，在桌面和窄屏检查布局、交互和阅读顺序。按读者第一次卡住的位置修复并复查。
+4. **审查与迭代。** 核对结论、真实路径与反例。HTML 学习页面向电脑使用，在桌面浏览器检查布局、交互和阅读顺序。按读者第一次卡住的位置修复并复查。
 
 ## Skill 目录
 
@@ -34,6 +34,7 @@
 | kern × vLLM | 用同一轮请求追调度、分组、缓存绑定、stream 交接和回传 | [Case、构建与审查](cases/kern-runtime/README.md) |
 | Model PR history | 看人如何维护档案，Agent 如何从模型问题查到可复核证据 | [Case 与构建](cases/model-pr-history/README.md) |
 | KernelWiki | 切换 B200/H100，沿 FlashAttention-4 候选追到资料和固定实现 | [Case、构建与审查](cases/kernel-wiki/README.md) |
+| S12 确定性归约 | 跟同一个输出元素走完 FP32 双缓冲求和，再切换到 SHARED32 组内写回 | [Case 与构建](cases/s12-det-sum/README.md) |
 
 ## 本地运行
 
@@ -46,6 +47,7 @@
 | kern × vLLM | `python scripts/build_kern.py` | `Kern_Runtime_Studio.html` |
 | Model PR history | `python scripts/build_pr_history.py` | `Model_PR_History.html` |
 | KernelWiki | `python scripts/build_kernel_wiki.py --output KernelWiki.html` | `KernelWiki.html` |
+| S12 确定性归约 | `python scripts/build_s12.py` | `S12_Learning_Studio.html` |
 
 给对应构建命令加 `--check` 可验证离线文件。用 `python -m kernel_learning serve` 预览网页源码，默认地址为 `http://127.0.0.1:8765`。构建、源码导入与浏览器检查见[仓库架构](docs/architecture.md)和[测试约定](docs/case-testing.md)。
 

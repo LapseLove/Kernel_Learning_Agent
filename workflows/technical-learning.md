@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 建立证据 | 新案例、研究或事实变更读 [source-evidence](../skills/core/source-evidence/SKILL.md)，按下表补领域分析 | 范围、版本、关键主张、可追踪的输入到输出、来源与未知项 |
 | 规划讲解 | 新讲解、主线重构或关键机制下钻读 [lesson-plan](../skills/core/lesson-plan/SKILL.md) | 读者目标、知识深度、贯穿全篇的例子与检查问题 |
-| 选择表达 | HTML 读 [visual-design](../skills/formats/html/visual-design/SKILL.md)，有多状态机制才读 [scene-author](../skills/formats/html/scene-author/SKILL.md)。讲义或问答直接用讲解提纲 | 章节或页面源码、产物和阅读路径 |
+| 选择表达 | HTML 读 [visual-design](../skills/formats/html/visual-design/SKILL.md)，需要模板起点时用 [html-ppt-reference](../skills/formats/html/html-ppt-reference/SKILL.md)，有多状态机制才读 [scene-author](../skills/formats/html/scene-author/SKILL.md)。讲义或问答直接用讲解提纲 | 章节或页面源码、产物和阅读路径 |
 | 核对并迭代 | [technical-review](../skills/core/technical-review/SKILL.md) 核对成品中的实质结论。HTML 另用 [visual-review](../skills/formats/html/visual-review/SKILL.md) 在浏览器检查 | 审查范围、同一交付版本、问题、修复与复查结果 |
 
 ## 按问题接入领域 skill

@@ -57,3 +57,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## HTML layout reference provenance
+
+The optional [html-ppt-reference skill](skills/formats/html/html-ppt-reference/SKILL.md)
+adapts six single-page layout styles from
+[lewislulu/html-ppt-skill](https://github.com/lewislulu/html-ppt-skill/tree/fd1629067909ff55b36b905476de4e5f26062a1f),
+commit `fd1629067909ff55b36b905476de4e5f26062a1f`, MIT,
+Copyright (c) 2026 lewis <sudolewis@gmail.com>.
+The [MIT license](skills/formats/html/html-ppt-reference/LICENSE) is preserved.
+[Source records](skills/formats/html/html-ppt-reference/references/upstream.json)
+identify the original paths, blobs, content hashes and adaptations.
+The local examples replace demo content and page wrappers, add system fonts
+and responsive styles, and use static local resources.

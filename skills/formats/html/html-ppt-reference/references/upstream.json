@@ -1,0 +1,45 @@
+{
+  "repository": "https://github.com/lewislulu/html-ppt-skill",
+  "commit": "fd1629067909ff55b36b905476de4e5f26062a1f",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 lewis <sudolewis@gmail.com>",
+  "adaptation": "Layout-specific CSS adapted from the listed templates. Demo content replaced with original schematic examples. Added shared responsive styles, system fonts, and viewport metadata. Slide runtime, animations, and CDN imports omitted.",
+  "files": [
+    {
+      "path": "assets/layouts/flow-diagram.html",
+      "upstream_path": "templates/single-page/flow-diagram.html",
+      "upstream_blob": "e7a4d677ab10f013b88971901e20dd613482f036",
+      "upstream_sha256": "ee58f3cec470f9105d1f5a2a890e94e3c83574ea89ea22651acc8a2d8937176a"
+    },
+    {
+      "path": "assets/layouts/arch-diagram.html",
+      "upstream_path": "templates/single-page/arch-diagram.html",
+      "upstream_blob": "f0e641529922cfc3be5776653376efdd35b74470",
+      "upstream_sha256": "c7eeb01a7d0f7a5578b9d4fa8827581c43b656dacef8ababd36829b18aadc942"
+    },
+    {
+      "path": "assets/layouts/comparison.html",
+      "upstream_path": "templates/single-page/comparison.html",
+      "upstream_blob": "ca768d14dbf1b91d8362492716948ab391ab82b3",
+      "upstream_sha256": "dfa3f4a626fe00ef6d9a7572bb55bdac932ee267926b802f7d560ee38731ddf7"
+    },
+    {
+      "path": "assets/layouts/code.html",
+      "upstream_path": "templates/single-page/code.html",
+      "upstream_blob": "6159ae50fde2a43630c083be1aa2cce290258477",
+      "upstream_sha256": "d40bf7527093529d6e4d953075d0bb4d0759658b5c8412cd48fea00499356d20"
+    },
+    {
+      "path": "assets/layouts/diff.html",
+      "upstream_path": "templates/single-page/diff.html",
+      "upstream_blob": "9d8e923f8943b8dbd5b42ba728801835e1e5bac8",
+      "upstream_sha256": "4978a2fd9b935b744cfcde58bede1f11dd81504da1f4685bb99705840694cfef"
+    },
+    {
+      "path": "assets/layouts/timeline.html",
+      "upstream_path": "templates/single-page/timeline.html",
+      "upstream_blob": "4c5d6b45d805cdeb3facb6943e4a749eb2f65927",
+      "upstream_sha256": "f4616525027c0c4e294cc9c299c6f1fb62d87cb54c55ded97f07faa0c2f25988"
+    }
+  ]
+}

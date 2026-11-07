@@ -19,4 +19,4 @@ description: 将技术讲解提纲转成易读的 HTML 页面，按关系选图�
 
 ## 构建
 
-选图之后读 [视觉规范与组件](references/design.md)。一节一个视觉焦点，先给结论和主图，再给说明与证据。需要逐步揭示时读 [scene-author](../scene-author/SKILL.md)。构建产物交给 [visual-review](../visual-review/SKILL.md) 走读。
+选图之后读 [视觉规范与组件](references/design.md)。需要版式起点时，按需加载 [html-ppt-reference](../html-ppt-reference/SKILL.md)，根据关系选择一个局部模板。一节一个视觉焦点，先给结论和主图，再给说明与证据。需要逐步揭示时读 [scene-author](../scene-author/SKILL.md)。构建产物交给 [visual-review](../visual-review/SKILL.md) 走读。

@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Adapted from https://github.com/lewislulu/html-ppt-skill/blob/fd1629067909ff55b36b905476de4e5f26062a1f/templates/single-page/timeline.html
+Copyright (c) 2026 lewis <sudolewis@gmail.com>. MIT license at ../../LICENSE.
+Project adaptations are recorded in ../../references/upstream.json. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>把版本变更按顺序组织 · 模板参考</title>
+<style>
+.tl{position:relative;margin-top:40px}
+.tl::before{content:"";position:absolute;left:0;right:0;top:48px;height:2px;background:var(--border)}
+.tl .row{display:grid;grid-template-columns:repeat(5,1fr);gap:22px;align-items:start}
+.tl .item{position:relative;padding-top:80px;text-align:center}
+.tl .dot{position:absolute;top:36px;left:50%;transform:translateX(-50%);width:24px;height:24px;border-radius:50%;background:var(--accent);border:4px solid var(--bg);box-shadow:0 0 0 2px var(--accent)}
+.tl .year{font-size:14px;color:var(--text-3);letter-spacing:.12em;text-transform:uppercase;position:absolute;top:0;left:0;right:0;font-weight:600}
+.tl h4{font-size:18px}
+.tl p{font-size:13px;color:var(--text-2)}
+</style>
+<link rel="stylesheet" href="../reference.css">
+</head>
+<body>
+<main class="reference">
+<p class="kicker">版式参考 / 示意内容</p>
+<h1>把版本变更按顺序组织</h1>
+<div class="tl"><div class="row">
+  <div class="item"><div class="year">版本 A</div><div class="dot"></div><h4>原有边界</h4><p>记录输入与条件</p></div>
+  <div class="item"><div class="year">版本 B</div><div class="dot"></div><h4>实现变化</h4><p>记录改动和来源</p></div>
+  <div class="item"><div class="year">版本 C</div><div class="dot"></div><h4>适用性复查</h4><p>补齐目标版本验证</p></div>
+</div></div>
+<p class="caption">等距节点表达先后次序。需要时间尺度时，按真实日期重新布局。</p>
+<footer><a href="https://github.com/lewislulu/html-ppt-skill/blob/fd1629067909ff55b36b905476de4e5f26062a1f/templates/single-page/timeline.html">html-ppt-skill 上游模板</a> · MIT · 已适配连续阅读与窄屏</footer>
+</main>
+</body>
+</html>

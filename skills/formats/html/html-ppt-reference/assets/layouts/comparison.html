@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Adapted from https://github.com/lewislulu/html-ppt-skill/blob/fd1629067909ff55b36b905476de4e5f26062a1f/templates/single-page/comparison.html
+Copyright (c) 2026 lewis <sudolewis@gmail.com>. MIT license at ../../LICENSE.
+Project adaptations are recorded in ../../references/upstream.json. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同一条件下对照两个候选 · 模板参考</title>
+<style>
+.vs{display:grid;grid-template-columns:1fr 90px 1fr;gap:28px;align-items:stretch;margin-top:30px}
+.vs .side{padding:30px}
+.vs .mid{font-size:56px;font-weight:800;color:var(--text-3);display:flex;align-items:center;justify-content:center}
+.vs .bad-side{border-top:3px solid var(--bad)}
+.vs .good-side{border-top:3px solid var(--good)}
+.vs h3{font-size:24px}
+.vs ul{padding-left:20px;font-size:15px;line-height:1.8;color:var(--text-2)}
+.vs li::marker{color:var(--bad)}
+.vs .good-side li::marker{color:var(--good)}
+</style>
+<link rel="stylesheet" href="../reference.css">
+</head>
+<body>
+<main class="reference">
+<p class="kicker">版式参考 / 示意内容</p>
+<h1>同一条件下对照两个候选</h1>
+<div class="vs">
+  <div class="card side bad-side"><h3>候选 A</h3><ul><li>适用条件 · 填写共同输入与指标</li><li>设计取舍 · 填写方案 A 的收益与代价</li><li>证据与缺口 · 填写出处和待查项</li></ul></div>
+  <div class="mid">↔</div>
+  <div class="card side good-side"><h3>候选 B</h3><ul><li>适用条件 · 与 A 的输入、指标对齐</li><li>设计取舍 · 填写方案 B 的收益与代价</li><li>证据与缺口 · 填写出处和待查项</li></ul></div>
+</div>
+<p class="caption">两侧使用相同字段。示例沿用中性配色，胜负需由同口径证据支持。</p>
+<footer><a href="https://github.com/lewislulu/html-ppt-skill/blob/fd1629067909ff55b36b905476de4e5f26062a1f/templates/single-page/comparison.html">html-ppt-skill 上游模板</a> · MIT · 已适配连续阅读与窄屏</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,52 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f7f3;
+  --surface: #ffffff;
+  --surface-2: #eff2ed;
+  --border: #cad3cc;
+  --text-1: #172e28;
+  --text-2: #3e554d;
+  --text-3: #51675e;
+  --accent: #1d5e4a;
+  --good: #196543;
+  --bad: #a02e34;
+  --radius: 8px;
+  --shadow: none;
+  --font-mono: ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-1); font: 16px/1.65 system-ui, "Microsoft YaHei", sans-serif; }
+.reference { width: min(1100px, calc(100% - 36px)); margin: 40px auto; }
+h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.25; }
+h3, h4 { margin: 0 0 .4rem; line-height: 1.4; }
+a { color: var(--accent); text-underline-offset: .2em; }
+.kicker { color: var(--accent); font-size: .85rem; font-weight: 700; }
+.card { padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+code { font-family: var(--font-mono); }
+.caption, footer { color: var(--text-2); font-size: .95rem; margin-top: 1.25rem; }
+footer { border-top: 1px solid var(--border); padding-top: 1rem; }
+.flow .arr small { display: block; font-size: .75rem; white-space: nowrap; }
+.vs .bad-side, .vs .good-side { border-top-color: var(--accent); }
+.vs li::marker, .vs .good-side li::marker { color: var(--text-2); }
+.diff .ln { white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff .hd { letter-spacing: normal; text-transform: none; }
+.tl .row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 700px) {
+  .reference { margin-block: 24px; }
+  .flow { flex-direction: column; align-items: stretch; gap: .5rem; }
+  .flow .node { padding: 1rem; }
+  .flow .arr { align-self: center; display: flex; gap: .6rem; align-items: center; }
+  .flow .arr span { display: inline-block; transform: rotate(90deg); order: -1; }
+  .arch .tier, .arch .cells, .arch .cells.three, .vs, .tl .row { grid-template-columns: minmax(0, 1fr); }
+  .arch .tier { gap: .5rem; }
+  .arch .tname { padding: .5rem; }
+  .vs .side { padding: 1rem; }
+  .vs .mid { display: none; }
+  .tl::before { left: 11px; right: auto; top: 0; bottom: 0; width: 2px; height: auto; }
+  .tl .item { padding: 0 0 0 45px; text-align: left; }
+  .tl .year { position: static; }
+  .tl .dot { top: 3px; left: 11px; }
+}
+
+.flow .node p, .arch .cell p { font-size: .9rem; }
